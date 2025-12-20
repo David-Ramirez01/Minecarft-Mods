@@ -4,6 +4,7 @@ import com.tumod.protectormod.menu.ProtectionCoreMenu;
 import com.tumod.protectormod.network.SyncCoreLevelPayload;
 import com.tumod.protectormod.registry.ModBlockEntities;
 import com.tumod.protectormod.registry.ModItems;
+import com.tumod.protectormod.registry.ModSounds;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
@@ -21,22 +22,36 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
 import net.neoforged.neoforge.network.PacketDistributor;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.HashSet;
-import java.util.Set;
-import java.util.UUID;
+import java.util.*;
 
 public class ProtectionCoreBlockEntity extends BlockEntity implements MenuProvider {
 
-    // Lista estática para que los eventos puedan consultar áreas protegidas rápidamente
     public static final Set<ProtectionCoreBlockEntity> CORES = new HashSet<>();
 
     private int coreLevel = 1;
     private UUID owner;
-    private final Set<UUID> trustedPlayers = new HashSet<>();
+
+    // Estructura de Permisos Unificada
+    private final Map<String, PlayerPermissions> permissionsMap = new HashMap<>();
+
+    public static class PlayerPermissions {
+        public boolean canBuild = false;
+        public boolean canInteract = false;
+        public boolean canOpenChests = false;
+
+        public PlayerPermissions() {}
+
+        public PlayerPermissions(boolean b, boolean i, boolean c) {
+            this.canBuild = b;
+            this.canInteract = i;
+            this.canOpenChests = c;
+        }
+    }
 
     private final SimpleContainer inventory = new SimpleContainer(2) {
         @Override
@@ -48,6 +63,10 @@ public class ProtectionCoreBlockEntity extends BlockEntity implements MenuProvid
 
     public ProtectionCoreBlockEntity(BlockPos pos, BlockState state) {
         super(ModBlockEntities.PROTECTION_CORE_BE.get(), pos, state);
+    }
+
+    public ProtectionCoreBlockEntity(BlockEntityType<?> type, BlockPos pos, BlockState state) {
+        super(type, pos, state);
     }
 
     @Override
@@ -64,20 +83,50 @@ public class ProtectionCoreBlockEntity extends BlockEntity implements MenuProvid
         CORES.remove(this);
     }
 
-    // === LÓGICA DE PROTECCIÓN (Llamada por ProtectionEvent) ===
+    // === SISTEMA DE PERMISOS ===
 
-    public UUID getOwnerUUID() { return this.owner; }
-
-    // Método solicitado por el sistema de eventos para validar acceso
-    public boolean isTrusted(Player player) {
-        if (player.getUUID().equals(owner)) return true;
-        return trustedPlayers.contains(player.getUUID());
+    public void updatePermission(String playerName, String type, boolean value) {
+        PlayerPermissions perms = permissionsMap.computeIfAbsent(playerName, k -> new PlayerPermissions());
+        switch (type) {
+            case "build" -> perms.canBuild = value;
+            case "interact" -> perms.canInteract = value;
+            case "chests" -> perms.canOpenChests = value;
+        }
+        markDirtyAndUpdate();
     }
 
-    // Calcula si una posición está dentro del cubo de protección
+    public boolean hasPermission(Player player, String type) {
+        if (player.getUUID().equals(owner) || player.hasPermissions(2)) return true;
+        PlayerPermissions perms = permissionsMap.get(player.getName().getString());
+        if (perms == null) return false;
+
+        return switch (type) {
+            case "build" -> perms.canBuild;
+            case "interact" -> perms.canInteract;
+            case "chests" -> perms.canOpenChests;
+            default -> false;
+        };
+    }
+
+    public boolean isTrusted(Player player) {
+        return hasPermission(player, "build");
+    }
+
+    public List<String> getTrustedNames() {
+        return permissionsMap.entrySet().stream()
+                .filter(entry -> {
+                    PlayerPermissions p = entry.getValue();
+                    // Solo incluimos si tiene algún permiso activo
+                    return p.canBuild || p.canInteract || p.canOpenChests;
+                })
+                .map(Map.Entry::getKey)
+                .toList();
+    }
+
+    // === LÓGICA DE ÁREA ===
+
     public boolean isInside(BlockPos targetPos) {
         int r = getRadius();
-        // Obtenemos la distancia absoluta en cada eje desde el centro (el Core)
         int distX = Math.abs(targetPos.getX() - this.worldPosition.getX());
         int distY = Math.abs(targetPos.getY() - this.worldPosition.getY());
         int distZ = Math.abs(targetPos.getZ() - this.worldPosition.getZ());
@@ -94,8 +143,7 @@ public class ProtectionCoreBlockEntity extends BlockEntity implements MenuProvid
         };
     }
 
-
-    // === GESTIÓN DE NBT ===
+    // === NBT (GUARDADO PERSISTENTE) ===
 
     @Override
     protected void saveAdditional(CompoundTag tag, HolderLookup.Provider registries) {
@@ -103,15 +151,16 @@ public class ProtectionCoreBlockEntity extends BlockEntity implements MenuProvid
         tag.putInt("CoreLevel", coreLevel);
         if (owner != null) tag.putUUID("Owner", owner);
 
-        ListTag trustedList = new ListTag();
-        for (UUID uuid : trustedPlayers) {
-            CompoundTag uTag = new CompoundTag();
-            uTag.putUUID("id", uuid);
-            trustedList.add(uTag);
-        }
-        tag.put("Trusted", trustedList);
+        CompoundTag permsTag = new CompoundTag();
+        permissionsMap.forEach((name, perms) -> {
+            CompoundTag pTag = new CompoundTag();
+            pTag.putBoolean("build", perms.canBuild);
+            pTag.putBoolean("interact", perms.canInteract);
+            pTag.putBoolean("chests", perms.canOpenChests);
+            permsTag.put(name, pTag);
+        });
+        tag.put("PermissionsData", permsTag);
 
-        // Guardado de inventario 1.21.1
         ListTag items = new ListTag();
         for (int i = 0; i < inventory.getContainerSize(); i++) {
             ItemStack st = inventory.getItem(i);
@@ -130,11 +179,16 @@ public class ProtectionCoreBlockEntity extends BlockEntity implements MenuProvid
         this.coreLevel = tag.getInt("CoreLevel");
         if (tag.hasUUID("Owner")) this.owner = tag.getUUID("Owner");
 
-        this.trustedPlayers.clear();
-        if (tag.contains("Trusted")) {
-            ListTag list = tag.getList("Trusted", Tag.TAG_COMPOUND);
-            for (int i = 0; i < list.size(); i++) {
-                trustedPlayers.add(list.getCompound(i).getUUID("id"));
+        this.permissionsMap.clear();
+        if (tag.contains("PermissionsData")) {
+            CompoundTag permsTag = tag.getCompound("PermissionsData");
+            for (String name : permsTag.getAllKeys()) {
+                CompoundTag pTag = permsTag.getCompound(name);
+                this.permissionsMap.put(name, new PlayerPermissions(
+                        pTag.getBoolean("build"),
+                        pTag.getBoolean("interact"),
+                        pTag.getBoolean("chests")
+                ));
             }
         }
 
@@ -152,21 +206,33 @@ public class ProtectionCoreBlockEntity extends BlockEntity implements MenuProvid
         }
     }
 
-    // === MEJORAS Y SINCRONIZACIÓN ===
+    // === OTROS ===
+
+// Dentro de ProtectionCoreBlockEntity.java
 
     public void upgrade() {
         if (!canUpgrade()) return;
+
+        // Consumir ítems
         this.inventory.getItem(0).shrink(1);
         int cost = (this.coreLevel == 1) ? 64 : 32;
         this.inventory.getItem(1).shrink(cost);
+
+        // Subir nivel
         this.coreLevel++;
         markDirtyAndUpdate();
+
         if (this.level != null && !this.level.isClientSide) {
-            PacketDistributor.sendToPlayersTrackingChunk(
-                    (ServerLevel) this.level,
+            // 1. Sonido para todos los jugadores cerca (Nivel del sonido aumenta con el nivel del core)
+            this.level.playSound(null, this.worldPosition,
+                    ModSounds.CORE_UPGRADE.get(),
+                    net.minecraft.sounds.SoundSource.BLOCKS,
+                    1.0F, 0.5F + (this.coreLevel * 0.1F));
+
+            // 2. Sincronizar nivel con clientes
+            PacketDistributor.sendToPlayersTrackingChunk((ServerLevel) this.level,
                     new ChunkPos(this.worldPosition),
-                    new SyncCoreLevelPayload(this.worldPosition, this.coreLevel)
-            );
+                    new SyncCoreLevelPayload(this.worldPosition, this.coreLevel));
         }
     }
 
@@ -175,7 +241,6 @@ public class ProtectionCoreBlockEntity extends BlockEntity implements MenuProvid
         ItemStack upgr = inventory.getItem(0);
         ItemStack cost = inventory.getItem(1);
         if (!upgr.is(ModItems.PROTECTION_UPGRADE.get())) return false;
-
         return switch (coreLevel) {
             case 1 -> cost.is(Items.IRON_INGOT) && cost.getCount() >= 64;
             case 2 -> cost.is(Items.GOLD_INGOT) && cost.getCount() >= 32;
@@ -185,44 +250,21 @@ public class ProtectionCoreBlockEntity extends BlockEntity implements MenuProvid
         };
     }
 
-    public void setCoreLevelClient(int level) {
-        this.coreLevel = level;
-        setChanged();
-    }
-
-    // === MÉTODOS REQUERIDOS ===
-
-    public void setOwner(UUID uuid) { this.owner = uuid; markDirtyAndUpdate(); }
-    public SimpleContainer getInventory() { return this.inventory; }
-    public int getCoreLevel() { return this.coreLevel; }
-
-    @Override
-    public Component getDisplayName() { return Component.literal("Protection Core"); }
-
-    @Nullable
-    @Override
-    public AbstractContainerMenu createMenu(int id, Inventory inv, Player player) {
-        return new ProtectionCoreMenu(id, inv, this);
-    }
-
-    @Override
-    public CompoundTag getUpdateTag(HolderLookup.Provider registries) {
-        CompoundTag tag = new CompoundTag();
-        saveAdditional(tag, registries);
-        return tag;
-    }
-
-    @Override
-    public ClientboundBlockEntityDataPacket getUpdatePacket() {
-        return ClientboundBlockEntityDataPacket.create(this);
-    }
-
-    private void markDirtyAndUpdate() {
+    public void markDirtyAndUpdate() {
         setChanged();
         if (level != null) {
             level.sendBlockUpdated(worldPosition, getBlockState(), getBlockState(), 3);
         }
     }
+
+    public UUID getOwnerUUID() { return owner; }
+    public void setOwner(UUID uuid) { this.owner = uuid; markDirtyAndUpdate(); }
+    public SimpleContainer getInventory() { return this.inventory; }
+    public int getCoreLevel() { return this.coreLevel; }
+    public void setCoreLevelClient(int level) { this.coreLevel = level; }
+
+    @Override public Component getDisplayName() { return Component.literal("Protection Core"); }
+    @Nullable @Override public AbstractContainerMenu createMenu(int id, Inventory inv, Player player) { return new ProtectionCoreMenu(id, inv, this); }
+    @Override public CompoundTag getUpdateTag(HolderLookup.Provider registries) { CompoundTag tag = new CompoundTag(); saveAdditional(tag, registries); return tag; }
+    @Override public ClientboundBlockEntityDataPacket getUpdatePacket() { return ClientboundBlockEntityDataPacket.create(this); }
 }
-
-

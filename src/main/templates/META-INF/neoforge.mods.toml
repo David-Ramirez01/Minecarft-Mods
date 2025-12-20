@@ -6,11 +6,11 @@ license="MIT"
 
 [[mods]]
 modId="protectormod"
-version="1.0.0"
+version="1.1.0"
 displayName="Protection Mod"
 authors="Shadow_K3"
 description='''
-Mod de protección de áreas tipo beacon.
+Mod de protección de áreas.
 '''
 # Verifica que ProtectorMod termine en 'd' minúscula
 modConstructor="com.tumod.protectormod.ProtectorMod"

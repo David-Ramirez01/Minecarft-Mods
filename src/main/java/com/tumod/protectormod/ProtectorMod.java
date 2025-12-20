@@ -50,5 +50,10 @@ public class ProtectorMod {
                 SyncCoreLevelPayload.CODEC,
                 ClientPayloadHandler::handleSyncCore // Esta es la forma más limpia en 1.21.1
         );
+        registrar.playToServer(
+                ChangePermissionPayload.TYPE,
+                ChangePermissionPayload.CODEC,
+                ServerPayloadHandler::handleChangePermission
+        );
     }
 }

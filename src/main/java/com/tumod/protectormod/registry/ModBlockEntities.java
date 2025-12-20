@@ -1,6 +1,7 @@
 package com.tumod.protectormod.registry;
 
 import com.tumod.protectormod.ProtectorMod;
+import com.tumod.protectormod.blockentity.AdminProtectorBlockEntity;
 import com.tumod.protectormod.blockentity.ProtectionCoreBlockEntity;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.world.level.block.entity.BlockEntityType;
@@ -18,10 +19,18 @@ public class ModBlockEntities {
             BLOCK_ENTITIES.register(
                     "protection_core_be",
                     () -> BlockEntityType.Builder.of(
-                            ProtectionCoreBlockEntity::new,
+                            (pos, state) -> new ProtectionCoreBlockEntity(ModBlockEntities.ADMIN_PROTECTOR_BE.get(), pos, state),
                             ModBlocks.PROTECTION_CORE.get()
                     ).build(null)
             );
+    public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<AdminProtectorBlockEntity>> ADMIN_PROTECTOR_BE =
+            BLOCK_ENTITIES.register(
+                    "admin_protector_be",
+                    () -> BlockEntityType.Builder.of(
+                            AdminProtectorBlockEntity::new,
+                            ModBlocks.ADMIN_PROTECTOR.get()
+                    ).build(null));
+
 }
 
 

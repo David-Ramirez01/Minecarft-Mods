@@ -1,15 +1,14 @@
 package com.tumod.protectormod.block;
 
 import com.tumod.protectormod.blockentity.ProtectionCoreBlockEntity;
+import com.tumod.protectormod.registry.ModBlockEntities;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.component.DataComponents;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.component.CustomData;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.EntityBlock;
@@ -27,7 +26,7 @@ public class ProtectionCoreBlock extends Block implements EntityBlock {
     @Override
     @Nullable
     public BlockEntity newBlockEntity(BlockPos pos, BlockState state) {
-        return new ProtectionCoreBlockEntity(pos, state);
+        return new ProtectionCoreBlockEntity(ModBlockEntities.ADMIN_PROTECTOR_BE.get(), pos, state);
     }
 
     @Override
