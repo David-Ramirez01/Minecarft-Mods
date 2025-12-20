@@ -1,7 +1,6 @@
 package com.tumod.protectormod.event;
 
 import com.tumod.protectormod.ProtectorMod;
-import com.tumod.protectormod.block.ProtectionCoreBlock;
 import com.tumod.protectormod.blockentity.ProtectionCoreBlockEntity;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
@@ -35,6 +34,7 @@ public class ProtectionEvent {
     @SubscribeEvent
     public static void onBlockInteract(PlayerInteractEvent.RightClickBlock event) {
         if (event.getLevel().isClientSide) return;
+        if (event.getEntity().hasPermissions(2)) return;
 
         BlockPos pos = event.getPos();
         Player player = event.getEntity();
@@ -52,32 +52,39 @@ public class ProtectionEvent {
         }
     }
 
-    // ✅ COLOCAR Y ROMPER BLOQUES
+// ✅ ROMPER BLOQUES Y PROTECCIÓN DEL NÚCLEO
     @SubscribeEvent
-    public static void onBlockPlace(BlockEvent.EntityPlaceEvent event) {
-        if (!(event.getEntity() instanceof Player player) || event.getLevel().isClientSide()) return;
-        Level level = (Level) event.getLevel();
+    public static void onBlockBreak(BlockEvent.BreakEvent event) {
+        if (event.getLevel().isClientSide()) return;
+
+        Player player = event.getPlayer();
         BlockPos pos = event.getPos();
+        Level level = (Level) event.getLevel();
 
-        // Lógica de límite de núcleos (se mantiene igual)
-        if (event.getPlacedBlock().getBlock() instanceof ProtectionCoreBlock) {
-            long count = CORES.stream()
-                    .filter(c -> c.getLevel() == level && player.getUUID().equals(c.getOwnerUUID()))
-                    .count();
+        // A. Protección especial para el objeto Núcleo (BlockEntity)
+        var blockEntity = level.getBlockEntity(pos);
+        if (blockEntity instanceof ProtectionCoreBlockEntity coreBE) {
+            // Si es OP (permiso 2+), puede romperlo siempre
+            if (player.hasPermissions(2)) return;
 
-            if (count >= 3) {
+            // Si NO es OP y NO es el dueño, cancelamos
+            if (coreBE.getOwnerUUID() != null && !coreBE.getOwnerUUID().equals(player.getUUID())) {
                 event.setCanceled(true);
-                player.displayClientMessage(Component.literal("Has alcanzado el límite de 3 núcleos").withStyle(ChatFormatting.YELLOW), true);
+                player.displayClientMessage(Component.literal("§cSolo el dueño o un administrador pueden retirar este núcleo."), true);
                 return;
             }
         }
 
-        // Validación de permiso de construcción
+        // B. Protección de bloques normales dentro del área
+        // Si el jugador es OP, saltamos la validación del área
+        if (player.hasPermissions(2)) return;
+
         for (ProtectionCoreBlockEntity core : CORES) {
             if (core.getLevel() == level && core.isInside(pos)) {
+                // Si no tiene permiso de construcción, no puede romper bloques
                 if (!core.hasPermission(player, "build")) {
                     event.setCanceled(true);
-                    player.displayClientMessage(Component.literal("No tienes permiso para construir aquí").withStyle(ChatFormatting.RED), true);
+                    player.displayClientMessage(Component.literal("No tienes permiso para romper bloques aquí").withStyle(ChatFormatting.RED), true);
                     return;
                 }
             }

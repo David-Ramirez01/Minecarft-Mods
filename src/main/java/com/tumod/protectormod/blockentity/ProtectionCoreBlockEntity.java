@@ -3,6 +3,7 @@ package com.tumod.protectormod.blockentity;
 import com.tumod.protectormod.menu.ProtectionCoreMenu;
 import com.tumod.protectormod.network.SyncCoreLevelPayload;
 import com.tumod.protectormod.registry.ModBlockEntities;
+import com.tumod.protectormod.registry.ModBlocks;
 import com.tumod.protectormod.registry.ModItems;
 import com.tumod.protectormod.registry.ModSounds;
 import net.minecraft.core.BlockPos;
@@ -95,6 +96,13 @@ public class ProtectionCoreBlockEntity extends BlockEntity implements MenuProvid
         markDirtyAndUpdate();
     }
 
+    public void removePlayerPermissions(String playerName) {
+        if (permissionsMap.containsKey(playerName)) {
+            permissionsMap.remove(playerName);
+            markDirtyAndUpdate(); // Esto enviará el paquete de actualización al cliente
+        }
+    }
+
     public boolean hasPermission(Player player, String type) {
         if (player.getUUID().equals(owner) || player.hasPermissions(2)) return true;
         PlayerPermissions perms = permissionsMap.get(player.getName().getString());
@@ -134,6 +142,10 @@ public class ProtectionCoreBlockEntity extends BlockEntity implements MenuProvid
     }
 
     public int getRadius() {
+        // Dentro de getRadius()
+        if (this.getBlockState().is(ModBlocks.ADMIN_PROTECTOR.get())) {
+            return 128; // O el radio gigante que prefieras para administradores
+        }
         return switch (this.coreLevel) {
             case 2 -> 16;
             case 3 -> 32;
@@ -141,6 +153,7 @@ public class ProtectionCoreBlockEntity extends BlockEntity implements MenuProvid
             case 5 -> 64;
             default -> 8;
         };
+
     }
 
     // === NBT (GUARDADO PERSISTENTE) ===
@@ -237,6 +250,9 @@ public class ProtectionCoreBlockEntity extends BlockEntity implements MenuProvid
     }
 
     public boolean canUpgrade() {
+        if (this.getBlockState().is(ModBlocks.ADMIN_PROTECTOR.get())) {
+            return false;
+        }
         if (coreLevel >= 5) return false;
         ItemStack upgr = inventory.getItem(0);
         ItemStack cost = inventory.getItem(1);

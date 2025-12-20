@@ -1,0 +1,5 @@
+{
+  "variants": {
+    "": { "model": "protectormod:block/admin_protector" }
+  }
+}

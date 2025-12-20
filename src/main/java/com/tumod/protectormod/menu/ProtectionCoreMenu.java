@@ -30,7 +30,7 @@ public class ProtectionCoreMenu extends AbstractContainerMenu {
         this.access = ContainerLevelAccess.create(core.getLevel(), core.getBlockPos());
 
         // Slot 0: Mejora (Solo acepta el ítem de mejora)
-        this.addSlot(new Slot(core.getInventory(), 0, 16, 117) {
+        this.addSlot(new Slot(core.getInventory(), 0, 15, 105) {
             @Override
             public boolean mayPlace(ItemStack stack) {
                 return stack.is(ModItems.PROTECTION_UPGRADE.get());
@@ -38,7 +38,7 @@ public class ProtectionCoreMenu extends AbstractContainerMenu {
         });
 
 // Slot 1: Coste (En el constructor de ProtectionCoreMenu)
-        this.addSlot(new Slot(core.getInventory(), 1, 144, 117) {
+        this.addSlot(new Slot(core.getInventory(), 1, 35, 105) {
             @Override
             public boolean mayPlace(ItemStack stack) {
                 // Usamos la lógica de validación que ya tienes en la BlockEntity

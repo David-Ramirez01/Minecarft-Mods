@@ -39,17 +39,23 @@ public class ServerPayloadHandler {
     public static void handleChangePermission(ChangePermissionPayload payload, IPayloadContext context) {
         context.enqueueWork(() -> {
             Player player = context.player();
-            // Validación de seguridad: el jugador debe estar cerca del bloque
-            if (player.distanceToSqr(payload.pos().getCenter()) > 64) return;
 
             if (player.level().getBlockEntity(payload.pos()) instanceof ProtectionCoreBlockEntity core) {
-                // Solo el dueño o un Admin puede cambiar permisos
+                // SEGURIDAD: Solo el dueño o Admin
                 if (player.getUUID().equals(core.getOwnerUUID()) || player.hasPermissions(2)) {
-                    core.updatePermission(payload.playerName(), payload.permissionType(), payload.value());
 
-                    // Notificar éxito
-                    player.displayClientMessage(Component.literal("§7[§6Protector§7] §fPermisos de §b" +
-                            payload.playerName() + "§f actualizados."), true);
+                    // Si el tipo es "remove", eliminamos al jugador por completo de la lista
+                    if (payload.permissionType().equals("remove")) {
+                        core.removePlayerPermissions(payload.playerName());
+                        player.displayClientMessage(Component.literal("§c[!] §fJugador §b" +
+                                payload.playerName() + "§f eliminado de la lista."), true);
+                    } else {
+                        // Si es un cambio normal (build, interact, chests)
+                        core.updatePermission(payload.playerName(), payload.permissionType(), payload.value());
+
+                        player.displayClientMessage(Component.literal("§7[§6Protector§7] §fPermisos de §b" +
+                                payload.playerName() + "§f actualizados."), true);
+                    }
                 }
             }
         });

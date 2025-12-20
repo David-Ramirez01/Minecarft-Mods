@@ -16,7 +16,6 @@ import static com.tumod.protectormod.registry.ModBlockEntities.BLOCK_ENTITIES;
 
 public class ModBlocks {
 
-    // CORRECCIÓN 1: Solo se necesita <Block>
     public static final DeferredRegister<Block> BLOCKS =
             DeferredRegister.create(Registries.BLOCK, ProtectorMod.MOD_ID);
 
