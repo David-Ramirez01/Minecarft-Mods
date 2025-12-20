@@ -1,0 +1,8 @@
+{
+  "block.protectormod.protection_core": "Protector MOD",
+  "item.protectormod.protection_upgrade": "Protector MOD",
+  "itemGroup.protector_tab": "Protector MOD",
+  "gui.protectormod.protection_core.level": "Nivel: %s",
+  "gui.protectormod.protection_core.upgrade": "Mejorar",
+  "gui.protectormod.protection_core.show_area": "Ver Area"
+}
