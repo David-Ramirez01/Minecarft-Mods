@@ -31,8 +31,6 @@ public class ServerPayloadHandler {
     // Se ejecuta cuando el jugador pulsa "Ver Área"
     public static void handleShowArea(ShowAreaPayload payload, IPayloadContext context) {
         context.enqueueWork(() -> {
-            // El servidor responde enviando un paquete de vuelta al cliente
-            // para que este dibuje las partículas
             context.reply(new ShowAreaClientPayload(payload.pos(), payload.radius()));
         });
     }
@@ -44,18 +42,17 @@ public class ServerPayloadHandler {
                 // SEGURIDAD: Solo el dueño o Admin
                 if (player.getUUID().equals(core.getOwnerUUID()) || player.hasPermissions(2)) {
 
-                    // Si el tipo es "remove", eliminamos al jugador por completo de la lista
                     if (payload.permissionType().equals("remove")) {
                         core.removePlayerPermissions(payload.playerName());
                         player.displayClientMessage(Component.literal("§c[!] §fJugador §b" +
                                 payload.playerName() + "§f eliminado de la lista."), true);
                     } else {
-                        // Si es un cambio normal (build, interact, chests)
                         core.updatePermission(payload.playerName(), payload.permissionType(), payload.value());
-
                         player.displayClientMessage(Component.literal("§7[§6Protector§7] §fPermisos de §b" +
                                 payload.playerName() + "§f actualizados."), true);
                     }
+                    core.setChanged();
+                    player.level().sendBlockUpdated(payload.pos(), core.getBlockState(), core.getBlockState(), 3);
                 }
             }
         });

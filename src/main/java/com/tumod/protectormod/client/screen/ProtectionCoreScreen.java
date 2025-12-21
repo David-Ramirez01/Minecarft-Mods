@@ -6,6 +6,7 @@ import com.tumod.protectormod.network.ChangePermissionPayload;
 import com.tumod.protectormod.network.ShowAreaPayload;
 import com.tumod.protectormod.network.UpgradeCorePayload;
 import com.tumod.protectormod.registry.ModItems;
+import net.minecraft.ChatFormatting;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
@@ -14,6 +15,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.player.Inventory;
 import net.neoforged.neoforge.network.PacketDistributor;
+import org.apache.logging.log4j.core.pattern.AbstractStyleNameConverter;
 
 import java.util.List;
 
@@ -28,6 +30,8 @@ public class ProtectionCoreScreen extends AbstractContainerScreen<ProtectionCore
     private boolean buildToggle = false;
     private boolean interactToggle = false;
     private boolean chestsToggle = false;
+    private Button clanButton;
+    private String selectedGuest = ""; //
 
     public ProtectionCoreScreen(ProtectionCoreMenu menu, Inventory inv, Component title) {
         super(menu, inv, title);
@@ -43,26 +47,33 @@ public class ProtectionCoreScreen extends AbstractContainerScreen<ProtectionCore
         int y = (this.height - this.imageHeight) / 2;
 
         // 1. CUADRO DE TEXTO
-        this.nameInput = new EditBox(this.font, x + 12, y + 40, 150, 12, Component.literal(""));
+        this.nameInput = new EditBox(this.font, x + 12, y + 35, 150, 12, Component.literal(""));
         this.nameInput.setMaxLength(16);
-        this.nameInput.setHint(Component.literal("Escribe un nombre...").withStyle(net.minecraft.ChatFormatting.GRAY));
+        this.nameInput.setHint(Component.literal("Escribe un nombre...").withStyle(ChatFormatting.WHITE));
         this.addRenderableWidget(this.nameInput);
 
         // 2. BOTONES DE PERMISOS (Compactos: 50px)
         this.buildBtn = this.addRenderableWidget(Button.builder(Component.literal("B: OFF"), b -> {
             buildToggle = !buildToggle;
             sendPermission(nameInput.getValue(), "build", buildToggle);
-        }).bounds(x + 10, y + 60, 50, 20).build());
+        }).bounds(x + 10, y + 55, 50, 20).build());
+
+        // Botón de Clan (Inicialmente desactivado)
+        this.clanButton = this.addRenderableWidget(Button.builder(Component.literal("Crear Clan"), b -> {
+            crearClanParaTodos();
+        }).bounds(x + 10, y + 78, 50, 20).build());
+        this.clanButton.active = false;
+
 
         this.interactBtn = this.addRenderableWidget(Button.builder(Component.literal("I: OFF"), b -> {
             interactToggle = !interactToggle;
             sendPermission(nameInput.getValue(), "interact", interactToggle);
-        }).bounds(x + 63, y + 60, 50, 20).build());
+        }).bounds(x + 63, y + 55, 50, 20).build());
 
         this.chestsBtn = this.addRenderableWidget(Button.builder(Component.literal("C: OFF"), b -> {
             chestsToggle = !chestsToggle;
             sendPermission(nameInput.getValue(), "chests", chestsToggle);
-        }).bounds(x + 116, y + 60, 50, 20).build());
+        }).bounds(x + 116, y + 55, 50, 20).build());
 
         // 3. BOTONES DE ACCIÓN (A la derecha para dejar espacio a los slots en x=15 y x=35)
         this.upgradeButton = this.addRenderableWidget(Button.builder(Component.translatable("gui.protectormod.protection_core.upgrade"), b -> {
@@ -70,14 +81,14 @@ public class ProtectionCoreScreen extends AbstractContainerScreen<ProtectionCore
                     net.minecraft.client.Minecraft.getInstance().player.playSound(
                             net.minecraft.sounds.SoundEvents.UI_BUTTON_CLICK.value(), 1.0F, 1.0F);
                 })
-                .bounds(x + 75, y + 115, 60, 20)
+                .bounds(x + 75, y + 100, 60, 20)
                 .build());
 
         this.addRenderableWidget(Button.builder(Component.translatable("gui.protectormod.protection_core.show_area"), b -> {
                     var core = this.menu.getCore();
                     PacketDistributor.sendToServer(new ShowAreaPayload(core.getBlockPos(), core.getRadius()));
                 })
-                .bounds(x + 137, y + 115, 30, 20).build());
+                .bounds(x + 137, y + 100, 30, 20).build());
 
         // Botón cerrar
         this.addRenderableWidget(Button.builder(Component.literal("X"), b -> this.onClose())
@@ -92,6 +103,8 @@ public class ProtectionCoreScreen extends AbstractContainerScreen<ProtectionCore
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTicks) {
         this.renderBackground(graphics, mouseX, mouseY, partialTicks);
         super.render(graphics, mouseX, mouseY, partialTicks);
+        List<String> guests = this.menu.getCore().getTrustedNames();
+        this.clanButton.active = guests.size() >= 3;
 
         int currentLevel = this.menu.getCore().getCoreLevel();
         boolean isMax = currentLevel >= 5;
@@ -114,12 +127,8 @@ public class ProtectionCoreScreen extends AbstractContainerScreen<ProtectionCore
 
         // Renderizado de Nivel con traducción
         Component levelText = Component.translatable("gui.protectormod.protection_core.level", currentLevel);
-        if (isMax) levelText = levelText.copy().append(" §6§l(MAX)");
+        if (isMax) levelText = Component.translatable(" §6§l(MAX)");
         graphics.drawString(this.font, levelText, x + 12, y + 15, 0x404040, false);
-
-        if (isMax) {
-            graphics.drawString(this.font, "§6§lCOMPLETO", x + 78, y + 105, 0xFFAA00);
-        }
 
         renderGuestList(graphics, mouseX, mouseY);
         renderUpgradeRequirements(graphics);
@@ -223,10 +232,10 @@ public class ProtectionCoreScreen extends AbstractContainerScreen<ProtectionCore
 
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
-        // Si es clic izquierdo (botón 0)
-        if (button == 0) {
+        if (button == 0) { // Clic izquierdo
             int x = (this.width - this.imageWidth) / 2;
             int y = (this.height - this.imageHeight) / 2;
+
             List<String> guests = this.menu.getCore().getTrustedNames();
             int listX = x - 105;
             int listY = y + 20;
@@ -236,27 +245,40 @@ public class ProtectionCoreScreen extends AbstractContainerScreen<ProtectionCore
                 int entryY = listY + 20 + (i * 14);
                 int removeBtnX = listX + 85;
 
-                // Si clicamos en la X
+                // Lógica para el botón [X] (Eliminar)
                 if (mouseX >= removeBtnX - 2 && mouseX <= removeBtnX + 12 &&
                         mouseY >= entryY - 2 && mouseY <= entryY + 10) {
-
                     removeAllPermissions(name);
-                    // Sonido de confirmación
-                    net.minecraft.client.Minecraft.getInstance().player.playSound(
-                            net.minecraft.sounds.SoundEvents.UI_BUTTON_CLICK.value(), 0.6F, 1.2F);
+                    playClickSound();
                     return true;
                 }
 
-                // Si clicamos en el nombre (para autocompletar)
+                // Lógica para clic en el NOMBRE (Seleccionar y ver permisos)
                 if (mouseX >= listX + 5 && mouseX <= removeBtnX - 5 &&
                         mouseY >= entryY && mouseY <= entryY + 10) {
 
                     this.nameInput.setValue(name);
+
+                    // Buscamos los permisos de este jugador en el Core
+                    var perms = this.menu.getCore().getPermissionsFor(name);
+                    if (perms != null) {
+                        // Actualizamos los estados internos para que los botones cambien de color/texto
+                        this.buildToggle = perms.canBuild;
+                        this.interactToggle = perms.canInteract;
+                        this.chestsToggle = perms.canOpenChests;
+                    }
+
+                    playClickSound();
                     return true;
                 }
             }
         }
         return super.mouseClicked(mouseX, mouseY, button);
+    }
+
+    private void playClickSound() {
+        net.minecraft.client.Minecraft.getInstance().player.playSound(
+                net.minecraft.sounds.SoundEvents.UI_BUTTON_CLICK.value(), 0.6F, 1.2F);
     }
 
     private void removeAllPermissions(String targetName) {
@@ -270,5 +292,29 @@ public class ProtectionCoreScreen extends AbstractContainerScreen<ProtectionCore
         int x = (this.width - this.imageWidth) / 2;
         int y = (this.height - this.imageHeight) / 2;
         graphics.blit(TEXTURE, x, y, 0, 0, imageWidth, imageHeight);
+    }
+
+    @Override
+    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        if (this.nameInput.keyPressed(keyCode, scanCode, modifiers)) {
+            return true;
+        }
+        // Si el cuadro de texto está enfocado, evitamos que la tecla 'E' cierre la GUI
+        if (this.nameInput.isFocused() && keyCode != 256) { // 256 es ESC
+            return true;
+        }
+        return super.keyPressed(keyCode, scanCode, modifiers);
+    }
+
+    private void crearClanParaTodos() {
+        List<String> guests = this.menu.getCore().getTrustedNames();
+        for (String guestName : guests) {
+            // Darle todos los permisos a cada uno
+            sendPermission(guestName, "build", true);
+            sendPermission(guestName, "interact", true);
+            sendPermission(guestName, "chests", true);
+        }
+        net.minecraft.client.Minecraft.getInstance().player.displayClientMessage(
+                Component.literal("§6[Clan] §f¡Todos los miembros han sido autorizados!"), false);
     }
 }

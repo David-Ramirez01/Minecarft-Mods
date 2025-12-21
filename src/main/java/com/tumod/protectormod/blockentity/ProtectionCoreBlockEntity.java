@@ -62,6 +62,14 @@ public class ProtectionCoreBlockEntity extends BlockEntity implements MenuProvid
         }
     };
 
+    public boolean areaOverlaps(BlockPos otherPos, int otherRadius) {
+        int thisRadius = this.getRadius();
+        // Comprobación de colisión de cajas (AABB)
+        return Math.abs(this.worldPosition.getX() - otherPos.getX()) <= (thisRadius + otherRadius) &&
+                Math.abs(this.worldPosition.getY() - otherPos.getY()) <= (thisRadius + otherRadius) &&
+                Math.abs(this.worldPosition.getZ() - otherPos.getZ()) <= (thisRadius + otherRadius);
+    }
+
     public ProtectionCoreBlockEntity(BlockPos pos, BlockState state) {
         super(ModBlockEntities.PROTECTION_CORE_BE.get(), pos, state);
     }
@@ -264,6 +272,10 @@ public class ProtectionCoreBlockEntity extends BlockEntity implements MenuProvid
             case 4 -> cost.is(Items.NETHERITE_INGOT) && cost.getCount() >= 32;
             default -> false;
         };
+    }
+
+    public PlayerPermissions getPermissionsFor(String name) {
+        return permissionsMap.get(name);
     }
 
     public void markDirtyAndUpdate() {

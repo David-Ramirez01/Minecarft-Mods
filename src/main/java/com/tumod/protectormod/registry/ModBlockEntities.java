@@ -10,19 +10,19 @@ import net.neoforged.neoforge.registries.DeferredRegister;
 
 public class ModBlockEntities {
 
-    // 1. Usamos Registries.BLOCK_ENTITY_TYPE (estándar de Minecraft/NeoForge)
     public static final DeferredRegister<BlockEntityType<?>> BLOCK_ENTITIES =
             DeferredRegister.create(Registries.BLOCK_ENTITY_TYPE, ProtectorMod.MOD_ID);
 
-    // 2. Cambiamos RegistryObject por DeferredHolder
     public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<ProtectionCoreBlockEntity>> PROTECTION_CORE_BE =
             BLOCK_ENTITIES.register(
                     "protection_core_be",
                     () -> BlockEntityType.Builder.of(
-                            (pos, state) -> new ProtectionCoreBlockEntity(ModBlockEntities.ADMIN_PROTECTOR_BE.get(), pos, state),
+                            // CORRECCIÓN: Usar el método de referencia o pasar el tipo correcto
+                            ProtectionCoreBlockEntity::new,
                             ModBlocks.PROTECTION_CORE.get()
                     ).build(null)
             );
+
     public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<AdminProtectorBlockEntity>> ADMIN_PROTECTOR_BE =
             BLOCK_ENTITIES.register(
                     "admin_protector_be",
@@ -30,7 +30,6 @@ public class ModBlockEntities {
                             AdminProtectorBlockEntity::new,
                             ModBlocks.ADMIN_PROTECTOR.get()
                     ).build(null));
-
 }
 
 
