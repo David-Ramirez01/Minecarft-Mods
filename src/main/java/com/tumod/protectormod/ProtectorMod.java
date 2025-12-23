@@ -1,9 +1,12 @@
 package com.tumod.protectormod;
 
+import com.tumod.protectormod.event.ProtectionEvent;
 import com.tumod.protectormod.network.*;
 import com.tumod.protectormod.registry.*;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.common.Mod;
+import net.neoforged.neoforge.common.NeoForge;
+import net.neoforged.neoforge.event.RegisterCommandsEvent;
 import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
 import net.neoforged.neoforge.network.registration.PayloadRegistrar;
 import com.tumod.protectormod.registry.*;
@@ -19,13 +22,18 @@ public class ProtectorMod {
         ModBlockEntities.BLOCK_ENTITIES.register(bus);
         ModMenus.MENUS.register(bus);
         ModCreativeTabs.TABS.register(bus);
+        NeoForge.EVENT_BUS.addListener(this::onRegisterCommands);
 
         // Registro de red
         bus.addListener(this::registerNetworking);
     }
 
+    private void onRegisterCommands(RegisterCommandsEvent event) {
+        ProtectionEvent.ProtectorCommands.register(event.getDispatcher());
+    }
+
     private void registerNetworking(final RegisterPayloadHandlersEvent event) {
-        final PayloadRegistrar registrar = event.registrar(MOD_ID).versioned("1.0.0");
+        final PayloadRegistrar registrar = event.registrar(MOD_ID);
 
         // Cliente -> Servidor (Usamos ServerPayloadHandler)
         registrar.playToServer(
@@ -39,7 +47,6 @@ public class ProtectorMod {
                 ServerPayloadHandler::handleShowArea
         );
 
-        // Servidor -> Cliente (Usamos un ClientPayloadHandler para las partículas y sincronización)
         registrar.playToClient(
                 ShowAreaClientPayload.TYPE,
                 ShowAreaClientPayload.CODEC,
@@ -48,12 +55,22 @@ public class ProtectorMod {
         registrar.playToClient(
                 SyncCoreLevelPayload.TYPE,
                 SyncCoreLevelPayload.CODEC,
-                ClientPayloadHandler::handleSyncCore // Esta es la forma más limpia en 1.21.1
+                ClientPayloadHandler::handleSyncCore
         );
         registrar.playToServer(
                 ChangePermissionPayload.TYPE,
                 ChangePermissionPayload.CODEC,
                 ServerPayloadHandler::handleChangePermission
+        );
+        registrar.playToServer(
+                UpdateAdminCorePayload.TYPE,
+                UpdateAdminCorePayload.CODEC,
+                ServerPayloadHandler::handleAdminUpdate
+        );
+        registrar.playToServer(
+                CreateClanPayload.TYPE,
+                CreateClanPayload.CODEC,
+                ServerPayloadHandler::handleCreateClan
         );
     }
 }

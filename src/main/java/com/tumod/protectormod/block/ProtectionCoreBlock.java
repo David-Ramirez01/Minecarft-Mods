@@ -72,15 +72,25 @@ public class ProtectionCoreBlock extends Block implements EntityBlock {
 
         BlockEntity be = level.getBlockEntity(pos);
         if (be instanceof ProtectionCoreBlockEntity core) {
-            // El dueño o un admin siempre pueden entrar
+
+            // LÓGICA ESPECIAL PARA EL ADMIN PROTECTOR
+            if (state.is(ModBlocks.ADMIN_PROTECTOR.get())) {
+                if (player.hasPermissions(2)) { // Solo OPs pueden configurar el Admin Core
+                    player.openMenu(core, pos);
+                    return InteractionResult.SUCCESS;
+                } else {
+                    player.displayClientMessage(Component.literal("§cEste es un Núcleo de Administración."), true);
+                    return InteractionResult.CONSUME;
+                }
+            }
+
+            // LÓGICA PARA CORES NORMALES
             if (!core.isTrusted(player)) {
                 player.displayClientMessage(Component.literal("§cNo tienes permiso para usar este core"), true);
                 return InteractionResult.CONSUME;
             }
 
-            if (player instanceof ServerPlayer serverPlayer) {
-                serverPlayer.openMenu(core, pos);
-            }
+            player.openMenu(core, pos);
             return InteractionResult.SUCCESS;
         }
 

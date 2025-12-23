@@ -27,6 +27,7 @@ public class ModBlocks {
                             .strength(3.0f, 1200.0f)
                             .lightLevel(state -> 10)
             ));
+
     public static final DeferredHolder<Block, AdminProtectorBlock>
             ADMIN_PROTECTOR = BLOCKS.register("admin_protector", AdminProtectorBlock::new);
 }

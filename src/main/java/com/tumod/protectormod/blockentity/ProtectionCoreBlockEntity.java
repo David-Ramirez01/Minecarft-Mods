@@ -35,15 +35,21 @@ public class ProtectionCoreBlockEntity extends BlockEntity implements MenuProvid
     public static final Set<ProtectionCoreBlockEntity> CORES = new HashSet<>();
 
     private int coreLevel = 1;
+    private int adminRadius = 128; // Nuevo: Radio para el Admin Core
     private UUID owner;
+    private boolean pvpEnabled = false;
+    private boolean explosionsDisabled = true;
 
     // Estructura de Permisos Unificada
     private final Map<String, PlayerPermissions> permissionsMap = new HashMap<>();
+    public boolean isPvpEnabled() { return pvpEnabled; }
+    public boolean areExplosionsDisabled() { return explosionsDisabled; }
 
     public static class PlayerPermissions {
         public boolean canBuild = false;
         public boolean canInteract = false;
         public boolean canOpenChests = false;
+
 
         public PlayerPermissions() {}
 
@@ -85,6 +91,8 @@ public class ProtectionCoreBlockEntity extends BlockEntity implements MenuProvid
             CORES.add(this);
         }
     }
+
+
 
     @Override
     public void setRemoved() {
@@ -149,16 +157,30 @@ public class ProtectionCoreBlockEntity extends BlockEntity implements MenuProvid
         return distX <= r && distY <= r && distZ <= r;
     }
 
+    /** Define el radio personalizado para el Admin Core */
+    public void setAdminRadius(int r) {
+        this.adminRadius = r;
+        this.markDirtyAndUpdate();
+    }
+
+    /** Activa o desactiva las explosiones en el área */
+    public void setExplosionsDisabled(boolean val) {
+        this.explosionsDisabled = val;
+        this.markDirtyAndUpdate();
+    }
+
+    /** Activa o desactiva el PvP en el área */
+    public void setPvpEnabled(boolean val) {
+        this.pvpEnabled = val;
+        this.markDirtyAndUpdate();
+    }
+
     public int getRadius() {
-        // Dentro de getRadius()
         if (this.getBlockState().is(ModBlocks.ADMIN_PROTECTOR.get())) {
-            return 128; // O el radio gigante que prefieras para administradores
+            return this.adminRadius; // Usa el radio ajustable
         }
         return switch (this.coreLevel) {
-            case 2 -> 16;
-            case 3 -> 32;
-            case 4 -> 48;
-            case 5 -> 64;
+            case 2 -> 16; case 3 -> 32; case 4 -> 48; case 5 -> 64;
             default -> 8;
         };
 
@@ -168,6 +190,9 @@ public class ProtectionCoreBlockEntity extends BlockEntity implements MenuProvid
 
     @Override
     protected void saveAdditional(CompoundTag tag, HolderLookup.Provider registries) {
+        tag.putInt("AdminRadius", adminRadius);
+        tag.putBoolean("PvPEnabled", pvpEnabled);
+        tag.putBoolean("ExplosionsDisabled", explosionsDisabled);
         super.saveAdditional(tag, registries);
         tag.putInt("CoreLevel", coreLevel);
         if (owner != null) tag.putUUID("Owner", owner);
@@ -196,6 +221,10 @@ public class ProtectionCoreBlockEntity extends BlockEntity implements MenuProvid
 
     @Override
     protected void loadAdditional(CompoundTag tag, HolderLookup.Provider registries) {
+        super.loadAdditional(tag, registries);
+        this.adminRadius = tag.getInt("AdminRadius");
+        this.pvpEnabled = tag.getBoolean("PvPEnabled");
+        this.explosionsDisabled = tag.getBoolean("ExplosionsDisabled");
         super.loadAdditional(tag, registries);
         this.coreLevel = tag.getInt("CoreLevel");
         if (tag.hasUUID("Owner")) this.owner = tag.getUUID("Owner");
@@ -284,6 +313,8 @@ public class ProtectionCoreBlockEntity extends BlockEntity implements MenuProvid
             level.sendBlockUpdated(worldPosition, getBlockState(), getBlockState(), 3);
         }
     }
+
+
 
     public UUID getOwnerUUID() { return owner; }
     public void setOwner(UUID uuid) { this.owner = uuid; markDirtyAndUpdate(); }

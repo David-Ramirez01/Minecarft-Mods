@@ -3,6 +3,7 @@ package com.tumod.protectormod.client.screen;
 import com.tumod.protectormod.ProtectorMod;
 import com.tumod.protectormod.menu.ProtectionCoreMenu;
 import com.tumod.protectormod.network.ChangePermissionPayload;
+import com.tumod.protectormod.network.CreateClanPayload;
 import com.tumod.protectormod.network.ShowAreaPayload;
 import com.tumod.protectormod.network.UpgradeCorePayload;
 import com.tumod.protectormod.registry.ModItems;
@@ -15,7 +16,6 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.player.Inventory;
 import net.neoforged.neoforge.network.PacketDistributor;
-import org.apache.logging.log4j.core.pattern.AbstractStyleNameConverter;
 
 import java.util.List;
 
@@ -60,7 +60,13 @@ public class ProtectionCoreScreen extends AbstractContainerScreen<ProtectionCore
 
         // Botón de Clan (Inicialmente desactivado)
         this.clanButton = this.addRenderableWidget(Button.builder(Component.literal("Crear Clan"), b -> {
-            crearClanParaTodos();
+            String clanName = this.nameInput.getValue().trim();
+            if (!clanName.isEmpty() && this.menu.getCore().getTrustedNames().size() >= 3) {
+                PacketDistributor.sendToServer(new CreateClanPayload(this.menu.getCore().getBlockPos(), clanName));
+                this.minecraft.setScreen(null);
+            }else{
+                this.minecraft.player.displayClientMessage(Component.literal("§cEscribe el nombre del clan arriba y ten 3+ invitados."), true);
+            }
         }).bounds(x + 10, y + 78, 50, 20).build());
         this.clanButton.active = false;
 
@@ -256,9 +262,7 @@ public class ProtectionCoreScreen extends AbstractContainerScreen<ProtectionCore
                 // Lógica para clic en el NOMBRE (Seleccionar y ver permisos)
                 if (mouseX >= listX + 5 && mouseX <= removeBtnX - 5 &&
                         mouseY >= entryY && mouseY <= entryY + 10) {
-
                     this.nameInput.setValue(name);
-
                     // Buscamos los permisos de este jugador en el Core
                     var perms = this.menu.getCore().getPermissionsFor(name);
                     if (perms != null) {
@@ -304,17 +308,5 @@ public class ProtectionCoreScreen extends AbstractContainerScreen<ProtectionCore
             return true;
         }
         return super.keyPressed(keyCode, scanCode, modifiers);
-    }
-
-    private void crearClanParaTodos() {
-        List<String> guests = this.menu.getCore().getTrustedNames();
-        for (String guestName : guests) {
-            // Darle todos los permisos a cada uno
-            sendPermission(guestName, "build", true);
-            sendPermission(guestName, "interact", true);
-            sendPermission(guestName, "chests", true);
-        }
-        net.minecraft.client.Minecraft.getInstance().player.displayClientMessage(
-                Component.literal("§6[Clan] §f¡Todos los miembros han sido autorizados!"), false);
     }
 }
