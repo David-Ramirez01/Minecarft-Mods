@@ -1,9 +1,7 @@
 package com.tumod.protectormod.client.screen;
 
 import com.tumod.protectormod.ProtectorMod;
-import com.tumod.protectormod.menu.ProtectionCoreMenu;
 import com.tumod.protectormod.registry.ModMenus;
-import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
@@ -18,20 +16,10 @@ public class ClientSetup {
 
     @SubscribeEvent
     public static void registerScreens(RegisterMenuScreensEvent event) {
-        // Especificamos explícitamente los tipos <ProtectionCoreMenu, AbstractContainerScreen<ProtectionCoreMenu>>
-        event.<ProtectionCoreMenu, AbstractContainerScreen<ProtectionCoreMenu>>register(
-                ModMenus.PROTECTION_CORE_MENU.get(),
-                (menu, inventory, title) -> {
-                    var core = menu.getCore();
+        // Pantalla Normal
+        event.register(ModMenus.PROTECTION_CORE_MENU.get(), ProtectionCoreScreen::new);
 
-                    // Verificamos si es el bloque de Admin
-                    if (core.getBlockState().is(com.tumod.protectormod.registry.ModBlocks.ADMIN_PROTECTOR.get())) {
-                        return new AdminCoreScreen(menu, inventory, title);
-                    }
-
-                    // Si no, devolvemos la pantalla normal
-                    return new ProtectionCoreScreen(menu, inventory, title);
-                }
-        );
+        // Pantalla Admin - Ahora sí se abrirá siempre que el menú sea ADMIN_CORE_MENU
+        event.register(ModMenus.ADMIN_CORE_MENU.get(), AdminCoreScreen::new);
     }
 }

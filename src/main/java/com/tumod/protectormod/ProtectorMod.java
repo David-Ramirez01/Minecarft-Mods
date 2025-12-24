@@ -29,7 +29,8 @@ public class ProtectorMod {
     }
 
     private void onRegisterCommands(RegisterCommandsEvent event) {
-        ProtectionEvent.ProtectorCommands.register(event.getDispatcher());
+        // Si tu clase se llama ClanCommands:
+        com.tumod.protectormod.command.ClanCommands.register(event.getDispatcher());
     }
 
     private void registerNetworking(final RegisterPayloadHandlersEvent event) {
@@ -72,5 +73,11 @@ public class ProtectorMod {
                 CreateClanPayload.CODEC,
                 ServerPayloadHandler::handleCreateClan
         );
+        registrar.playToServer(
+                UpdateFlagPayload.TYPE,
+                UpdateFlagPayload.CODEC,
+                ServerPayloadHandler::handleUpdateFlag
+        );
+
     }
 }

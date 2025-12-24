@@ -9,49 +9,52 @@ import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.ContainerLevelAccess;
+import net.minecraft.world.inventory.MenuType;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 
 public class ProtectionCoreMenu extends AbstractContainerMenu {
-
-    private final ProtectionCoreBlockEntity core;
+    private final ProtectionCoreBlockEntity core; // Usaremos solo 'core' para evitar confusiones
     private final ContainerLevelAccess access;
 
     // 🔹 CONSTRUCTOR PARA EL SERVIDOR
-    public ProtectionCoreMenu(int id, Inventory playerInv, ProtectionCoreBlockEntity core) {
-        super(ModMenus.PROTECTION_CORE_MENU.get(), id);
+    public ProtectionCoreMenu(MenuType<?> type, int id, Inventory playerInv, ProtectionCoreBlockEntity core) {
+        super(type, id);
 
-        if (core == null) {
-            throw new IllegalStateException("ProtectionCoreBlockEntity is null");
-        }
+        if (core == null) throw new IllegalStateException("ProtectionCoreBlockEntity is null");
 
         this.core = core;
         this.access = ContainerLevelAccess.create(core.getLevel(), core.getBlockPos());
 
-        // Slot 0: Mejora (Solo acepta el ítem de mejora)
-        this.addSlot(new Slot(core.getInventory(), 0, 15, 105) {
-            @Override
-            public boolean mayPlace(ItemStack stack) {
-                return stack.is(ModItems.PROTECTION_UPGRADE.get());
-            }
-        });
+        // VERIFICACIÓN: ¿Es un Admin Core?
+        boolean isAdminCore = core.getBlockState().is(ModBlocks.ADMIN_PROTECTOR.get());
 
-// Slot 1: Coste (En el constructor de ProtectionCoreMenu)
-        this.addSlot(new Slot(core.getInventory(), 1, 35, 105) {
-            @Override
-            public boolean mayPlace(ItemStack stack) {
-                // Usamos la lógica de validación que ya tienes en la BlockEntity
-                int currentLevel = core.getCoreLevel();
-                return switch (currentLevel) {
-                    case 1 -> stack.is(Items.IRON_INGOT);
-                    case 2 -> stack.is(Items.GOLD_INGOT);
-                    case 3 -> stack.is(Items.DIAMOND);
-                    case 4 -> stack.is(Items.NETHERITE_INGOT);
-                    default -> false;
-                };
-            }
-        });
+        // Solo añadimos los slots si NO es el Admin Core
+        if (!isAdminCore) {
+            // Slot 0: Mejora
+            this.addSlot(new Slot(core.getInventory(), 0, 15, 105) {
+                @Override
+                public boolean mayPlace(ItemStack stack) {
+                    return stack.is(ModItems.PROTECTION_UPGRADE.get());
+                }
+            });
+
+            // Slot 1: Coste
+            this.addSlot(new Slot(core.getInventory(), 1, 35, 105) {
+                @Override
+                public boolean mayPlace(ItemStack stack) {
+                    int currentLevel = core.getCoreLevel();
+                    return switch (currentLevel) {
+                        case 1 -> stack.is(Items.IRON_INGOT);
+                        case 2 -> stack.is(Items.GOLD_INGOT);
+                        case 3 -> stack.is(Items.DIAMOND);
+                        case 4 -> stack.is(Items.NETHERITE_INGOT);
+                        default -> false;
+                    };
+                }
+            });
+        }
 
         addPlayerInventory(playerInv);
         addPlayerHotbar(playerInv);
@@ -59,27 +62,49 @@ public class ProtectionCoreMenu extends AbstractContainerMenu {
 
     // 🔹 CONSTRUCTOR PARA EL CLIENTE (Invocado por NeoForge)
     public ProtectionCoreMenu(int id, Inventory playerInv, RegistryFriendlyByteBuf buf) {
-        this(id, playerInv, getBlockEntity(playerInv, buf));
+        this(ModMenus.PROTECTION_CORE_MENU.get(), id, playerInv, getBlockEntity(playerInv, buf));
     }
 
-    private static ProtectionCoreBlockEntity getBlockEntity(Inventory inv, RegistryFriendlyByteBuf buf) {
+    // 🔹 MÉTODO PÚBLICO para el registro de Admin Core
+    public static ProtectionCoreMenu createAdminMenu(int id, Inventory playerInv, RegistryFriendlyByteBuf buf) {
+        return new ProtectionCoreMenu(ModMenus.ADMIN_CORE_MENU.get(), id, playerInv, getBlockEntity(playerInv, buf));
+    }
+
+    // 🔹 CAMBIADO A PUBLIC: Ahora AdminCoreScreen puede usarlo si lo necesita
+    public static ProtectionCoreBlockEntity getBlockEntity(Inventory inv, RegistryFriendlyByteBuf buf) {
         var pos = buf.readBlockPos();
         var be = inv.player.level().getBlockEntity(pos);
 
-        if (be instanceof ProtectionCoreBlockEntity core) {
-            return core;
+        if (be instanceof ProtectionCoreBlockEntity coreBE) {
+            return coreBE;
         }
         throw new IllegalStateException("BlockEntity at " + pos + " is missing!");
     }
 
     @Override
     public boolean stillValid(Player player) {
-        // Vinculamos la validez al bloque PROTECTION_CORE
-        return stillValid(this.access, player, ModBlocks.PROTECTION_CORE.get());
+        return stillValid(this.access, player, ModBlocks.PROTECTION_CORE.get())
+                || stillValid(this.access, player, ModBlocks.ADMIN_PROTECTOR.get());
     }
+
+    // --- MÉTODOS DE ACCESO PARA LA SCREEN ---
+
+    public ProtectionCoreBlockEntity getBlockEntity() {
+        return this.core;
+    }
+
+    public ProtectionCoreBlockEntity getCore() {
+        return this.core;
+    }
+
+    // --- LÓGICA DE SLOTS ---
 
     @Override
     public ItemStack quickMoveStack(Player player, int index) {
+        // Si es Admin Core, no hay slots de máquina (containerSlots = 0)
+        boolean isAdmin = core.getBlockState().is(ModBlocks.ADMIN_PROTECTOR.get());
+        int containerSlots = isAdmin ? 0 : 2;
+
         ItemStack result = ItemStack.EMPTY;
         Slot slot = this.slots.get(index);
 
@@ -87,17 +112,18 @@ public class ProtectionCoreMenu extends AbstractContainerMenu {
             ItemStack stack = slot.getItem();
             result = stack.copy();
 
-            int containerSlots = 2; // Slots de la máquina (0 y 1)
-
             if (index < containerSlots) {
-                // De la máquina al inventario del jugador
                 if (!this.moveItemStackTo(stack, containerSlots, this.slots.size(), true)) {
                     return ItemStack.EMPTY;
                 }
             } else {
-                // Del inventario del jugador a la máquina
-                if (!this.moveItemStackTo(stack, 0, containerSlots, false)) {
-                    return ItemStack.EMPTY;
+                // Solo movemos a la máquina si hay slots disponibles
+                if (containerSlots > 0) {
+                    if (!this.moveItemStackTo(stack, 0, containerSlots, false)) {
+                        return ItemStack.EMPTY;
+                    }
+                } else {
+                    return ItemStack.EMPTY; // No hay donde mover en el Admin Core
                 }
             }
 
@@ -117,23 +143,11 @@ public class ProtectionCoreMenu extends AbstractContainerMenu {
             }
         }
     }
+
     private void addPlayerHotbar(Inventory inv) {
         for (int col = 0; col < 9; ++col) {
             this.addSlot(new Slot(inv, col, 8 + col * 18, 198));
         }
-    }
-
-    // Dentro de ProtectionCoreMenu.java
-    public void handleUpgradeRequest() {
-        // Verificamos que estamos operando sobre la BlockEntity
-        if (this.core != null) {
-            this.core.upgrade();
-            // Al llamar a upgrade(), la BE consume los ítems y sube el nivel
-        }
-    }
-
-    public ProtectionCoreBlockEntity getCore() {
-        return core;
     }
 }
 

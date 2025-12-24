@@ -61,34 +61,40 @@ public class ServerPayloadHandler {
             }
         });
     }
+
+
     public static void handleCreateClan(CreateClanPayload payload, IPayloadContext context) {
         context.enqueueWork(() -> {
             Player owner = context.player();
             Level level = owner.level();
 
             if (level.getBlockEntity(payload.pos()) instanceof ProtectionCoreBlockEntity core) {
-                // 1. El Owner pone el mensaje en el chat (como pediste)
+                // --- NUEVO: Guardar el nombre en el núcleo ---
+                core.setClanName(payload.clanName());
+
+                // 1. Mensaje global en el chat
                 Component chatMsg = Component.literal("§6[Clan] " + owner.getName().getString() + " ha fundado el clan: §b" + payload.clanName());
                 level.getServer().getPlayerList().broadcastSystemMessage(chatMsg, false);
 
-                // 2. Procesar a los miembros
+                // 2. Procesar a los miembros actuales
                 List<String> members = core.getTrustedNames();
                 for (String memberName : members) {
-                    // Dar todos los permisos
                     core.updatePermission(memberName, "build", true);
                     core.updatePermission(memberName, "interact", true);
                     core.updatePermission(memberName, "chests", true);
 
-                    // 3. Enviar mensaje encima de la Hotbar a los miembros
                     ServerPlayer sMember = level.getServer().getPlayerList().getPlayerByName(memberName);
                     if (sMember != null) {
                         sMember.displayClientMessage(
                                 Component.literal("§a¡Felicidades por unirte al clan §6" + payload.clanName() + "§a!"),
-                                true // 'true' hace que aparezca sobre la hotbar
+                                true
                         );
                     }
                 }
+
+                // 3. Sincronización crucial
                 core.setChanged();
+                // Flag 3 fuerza la actualización del BlockState y los datos NBT al cliente
                 level.sendBlockUpdated(payload.pos(), core.getBlockState(), core.getBlockState(), 3);
             }
         });
@@ -97,18 +103,70 @@ public class ServerPayloadHandler {
     public static void handleAdminUpdate(UpdateAdminCorePayload payload, IPayloadContext context) {
         context.enqueueWork(() -> {
             Player player = context.player();
-            // Verificamos si el jugador es OP antes de aplicar cambios
+
+            // Verificación de seguridad (Nivel 2 = OP/Admin)
             if (player.hasPermissions(2)) {
                 Level level = player.level();
                 if (level.getBlockEntity(payload.pos()) instanceof ProtectionCoreBlockEntity core) {
+
+                    // 1. Aplicamos los cambios principales
                     core.setAdminRadius(payload.radius());
                     core.setPvpEnabled(payload.pvp());
                     core.setExplosionsDisabled(payload.explosions());
 
-                    player.displayClientMessage(Component.literal("§aConfiguración de Admin Core actualizada."), true);
+                    // 2. Si quieres añadir más de las 20 flags aquí:
+
+                    // 3. IMPORTANTE: En lugar de dataAccess.set, usamos markDirtyAndUpdate()
+                    // Esto envía el UpdatePacket automáticamente a los clientes cercanos
+                    core.markDirtyAndUpdate();
+
+                    player.displayClientMessage(Component.literal("§d[Admin]§a Configuración sincronizada."), true);
+                }
+            } else {
+                player.displayClientMessage(Component.literal("§cPermisos insuficientes."), true);
+            }
+        });
+    }
+
+    public static void handleOpenFlags(OpenFlagsPayload payload, IPayloadContext context) {
+        context.enqueueWork(() -> {
+            Player player = context.player();
+            Level level = player.level();
+
+            if (level.getBlockEntity(payload.pos()) instanceof ProtectionCoreBlockEntity core) {
+                // Solo el dueño o un Admin pueden ver las Flags
+                if (player.getUUID().equals(core.getOwnerUUID()) || player.hasPermissions(2)) {
+                    // Aquí abres el nuevo menú de Flags
+                     player.openMenu(core, payload.pos());
                 }
             }
         });
     }
 
+    public static void handleUpdateFlag(UpdateFlagPayload payload, IPayloadContext context) {
+        context.enqueueWork(() -> {
+            Player player = context.player();
+            Level level = player.level();
+
+            if (level.getBlockEntity(payload.pos()) instanceof ProtectionCoreBlockEntity core) {
+                // Verificación de seguridad: Dueño o Admin (OP)
+                // Gracias al getOwnerUUID() protegido con NIL_UUID, esto ya no crashea
+                if (player.getUUID().equals(core.getOwnerUUID()) || player.hasPermissions(2)) {
+
+                    String flagId = payload.flag();
+
+                    // Lógica Dinámica para las 20 flags
+                    // Si la flag existe en nuestro mapa, invertimos su valor
+                    boolean currentValue = core.getFlag(flagId);
+                    core.setFlag(flagId, !currentValue);
+
+                    // IMPORTANTE: Sincroniza los cambios con los clientes y guarda en disco
+                    core.markDirtyAndUpdate();
+
+                    player.displayClientMessage(Component.literal("§6[Core] §f" + flagId + " cambiado a: " +
+                            (!currentValue ? "§aON" : "§cOFF")), true);
+                }
+            }
+        });
+    }
 }

@@ -13,7 +13,6 @@ public record CreateClanPayload(BlockPos pos, String clanName) implements Custom
     public static final Type<CreateClanPayload> TYPE =
             new Type<>(ResourceLocation.fromNamespaceAndPath(ProtectorMod.MOD_ID, "create_clan"));
 
-    // El CODEC que soluciona el error:
     public static final StreamCodec<ByteBuf, CreateClanPayload> CODEC = StreamCodec.composite(
             BlockPos.STREAM_CODEC, CreateClanPayload::pos,
             ByteBufCodecs.STRING_UTF8, CreateClanPayload::clanName,

@@ -9,17 +9,17 @@ import net.neoforged.neoforge.registries.DeferredHolder;
 import net.neoforged.neoforge.registries.DeferredRegister;
 
 public class ModMenus {
-
-    // 1. Usamos Registries.MENU para NeoForge
     public static final DeferredRegister<MenuType<?>> MENUS =
             DeferredRegister.create(Registries.MENU, ProtectorMod.MOD_ID);
 
-    // 2. Usamos IMenuTypeExtension.create en lugar de IForgeMenuType
-    // 3. Cambiamos RegistryObject por DeferredHolder
+    // Menú para el Core Normal
     public static final DeferredHolder<MenuType<?>, MenuType<ProtectionCoreMenu>> PROTECTION_CORE_MENU =
-            MENUS.register(
-                    "protection_core_menu",
-                    () -> IMenuTypeExtension.create(ProtectionCoreMenu::new)
-            );
+            MENUS.register("protection_core_menu",
+                    () -> IMenuTypeExtension.create(ProtectionCoreMenu::new));
+
+    // NUEVO: Menú para el Admin Core
+    public static final DeferredHolder<MenuType<?>, MenuType<ProtectionCoreMenu>> ADMIN_CORE_MENU =
+            MENUS.register("admin_core_menu",
+                    () -> IMenuTypeExtension.create(ProtectionCoreMenu::createAdminMenu));
 }
 
