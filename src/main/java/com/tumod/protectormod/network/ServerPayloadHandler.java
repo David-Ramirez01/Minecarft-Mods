@@ -58,16 +58,22 @@ public class ServerPayloadHandler {
                         core.removePlayerPermissions(payload.playerName());
                         player.displayClientMessage(Component.literal("§c[!] §fJugador §b" + payload.playerName() + "§f eliminado."), true);
                         core.markDirtyAndUpdate();
-                        return; // Terminamos aquí
+                        return;
                     }
 
-                    // 2. CASO JUGADOR EXISTENTE: Si ya está en la lista, modificar sin invitar
-                    // Debes tener un método en tu Core que verifique si el jugador ya tiene algún registro de permisos
+                    // 2. CASO JUGADOR EXISTENTE: Modificar sin invitar
                     if (core.getPlayersWithAnyPermission().contains(payload.playerName())) {
                         core.updatePermission(payload.playerName(), payload.permissionType(), payload.value());
                         player.displayClientMessage(Component.literal("§7[§6Protector§7] §fPermisos de §b" + payload.playerName() + "§f actualizados."), true);
                         core.markDirtyAndUpdate();
-                        return; // Terminamos aquí para no enviar la invitación
+                        return;
+                    }
+
+                    // --- VALIDACIÓN DE LÍMITE DE INVITADOS (NUEVO) ---
+                    // Si el jugador no existe en la lista y ya hay 8, bloqueamos la invitación.
+                    if (core.getPlayersWithAnyPermission().size() >= 8) {
+                        player.displayClientMessage(Component.literal("§c[!] El núcleo ya alcanzó el límite máximo de 8 invitados."), true);
+                        return;
                     }
 
                     // 3. CASO JUGADOR NUEVO: Lógica de invitación

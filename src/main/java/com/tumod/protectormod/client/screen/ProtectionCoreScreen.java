@@ -109,69 +109,6 @@ public class ProtectionCoreScreen extends AbstractContainerScreen<ProtectionCore
         PacketDistributor.sendToServer(new ChangePermissionPayload(this.menu.getCore().getBlockPos(), player, type, value));
     }
 
-    @Override
-    public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTicks) {
-        this.renderBackground(graphics, mouseX, mouseY, partialTicks);
-        super.render(graphics, mouseX, mouseY, partialTicks);
-
-        var core = this.menu.getCore();
-        List<String> guests = core.getTrustedNames();
-
-        // 1. COMPROBACIÓN DE CLAN: ¿Ya tiene nombre asignado?
-        // Asegúrate de tener el método getClanName() en tu ProtectionCoreBlockEntity
-        boolean alreadyHasClan = core.getClanName() != null && !core.getClanName().isEmpty();
-
-        // 2. LÓGICA DEL BOTÓN CLAN
-        // Se activa solo si tiene 3+ invitados Y NO tiene clan todavía
-        this.clanButton.active = guests.size() >= 3 && !alreadyHasClan;
-
-        // Cambiamos el texto del botón para dar feedback visual
-        if (alreadyHasClan) {
-            this.clanButton.setMessage(Component.literal("§8Clan: " + core.getClanName()));
-        } else {
-            this.clanButton.setMessage(Component.literal("Crear Clan"));
-        }
-
-        int currentLevel = core.getCoreLevel();
-        boolean isMax = currentLevel >= 5;
-
-        // --- LÓGICA DE INTERFAZ DINÁMICA (Permisos) ---
-        String currentInput = nameInput.getValue().trim();
-        boolean hasName = !currentInput.isEmpty();
-
-        this.buildBtn.active = hasName;
-        this.interactBtn.active = hasName;
-        this.chestsBtn.active = hasName;
-
-        if (hasName) {
-            var perms = core.getPermissionsFor(currentInput);
-            this.buildToggle = perms.canBuild;
-            this.interactToggle = perms.canInteract;
-            this.chestsToggle = perms.canOpenChests;
-        } else {
-            this.buildToggle = this.interactToggle = this.chestsToggle = false;
-        }
-
-        // Actualizar texto de botones de permisos
-        this.buildBtn.setMessage(Component.literal("B: " + (buildToggle ? "§aON" : "§cOFF")));
-        this.interactBtn.setMessage(Component.literal("I: " + (interactToggle ? "§aON" : "§cOFF")));
-        this.chestsBtn.setMessage(Component.literal("C: " + (chestsToggle ? "§aON" : "§cOFF")));
-
-        int x = (this.width - this.imageWidth) / 2;
-        int y = (this.height - this.imageHeight) / 2;
-
-        // Renderizado de Nivel
-        Component levelText = Component.translatable("gui.protectormod.protection_core.level", currentLevel);
-        if (isMax) levelText = Component.literal("Nivel " + currentLevel + " §6§l(MAX)");
-        graphics.drawString(this.font, levelText, x + 12, y + 15, 0x404040, false);
-
-        renderGuestList(graphics, mouseX, mouseY);
-        renderUpgradeRequirements(graphics);
-        renderNameSuggestions(graphics, mouseX, mouseY);
-
-        this.renderTooltip(graphics, mouseX, mouseY);
-    }
-
     private void handlePlayerAdd() {
         String name = this.nameInput.getValue().trim();
         if (!name.isEmpty()) {
@@ -187,19 +124,19 @@ public class ProtectionCoreScreen extends AbstractContainerScreen<ProtectionCore
         }
     }
 
-
-
     private void renderUpgradeRequirements(GuiGraphics graphics) {
-        int x = (this.width + this.imageWidth) / 2 + 5;
-        int y = (this.height - this.imageHeight) / 2 + 20;
+        int x = (this.width - this.imageWidth) / 2 - 105;
+        int y = (this.height - this.imageHeight) / 2 + 150;
+
         var core = this.menu.getCore();
         int level = core.getCoreLevel();
 
-        graphics.fill(x, y, x + 100, y + 85, 0x88000000);
-        graphics.drawString(this.font, "§eRequisitos:", x + 5, y + 5, 0xFFFFFF);
+        // Dibujamos el fondo (alto reducido a 60 ya que solo son 2-3 líneas)
+        graphics.fill(x, y, x + 100, y + 60, 0x88000000);
+        graphics.drawString(this.font, "§e§lRequisitos:", x + 5, y + 5, 0xFFFFFF);
 
         if (level >= 5) {
-            graphics.drawString(this.font, "§a✔ Completado", x + 5, y + 25, 0xFFFFFF);
+            graphics.drawString(this.font, "§a✔ Máximo Nivel", x + 5, y + 25, 0xFFFFFF);
             return;
         }
 
@@ -208,20 +145,22 @@ public class ProtectionCoreScreen extends AbstractContainerScreen<ProtectionCore
             case 2 -> "32x Oro";
             case 3 -> "32x Diamante";
             case 4 -> "32x Netherite";
-            default -> "";
+            default -> "???";
         };
 
         boolean hasUpgradeItem = core.getInventory().getItem(0).is(ModItems.PROTECTION_UPGRADE.get());
         boolean hasMaterials = core.canUpgrade();
 
-        renderRequirement(graphics, x + 5, y + 25, "1x Mejora", hasUpgradeItem);
-        renderRequirement(graphics, x + 5, y + 40, material, hasMaterials);
+        // Renderizamos los requisitos con el nuevo formato
+        renderRequirement(graphics, x + 5, y + 22, "1x Mejora", hasUpgradeItem);
+        renderRequirement(graphics, x + 5, y + 35, material, hasMaterials);
     }
 
     private void renderRequirement(GuiGraphics graphics, int x, int y, String text, boolean met) {
         String prefix = met ? "§a[✔] " : "§c[X] ";
         graphics.drawString(this.font, prefix + "§7" + text, x, y, 0xFFFFFF);
     }
+
 
     private void renderNameSuggestions(GuiGraphics graphics, int mouseX, int mouseY) {
         String input = nameInput.getValue();
@@ -263,21 +202,110 @@ public class ProtectionCoreScreen extends AbstractContainerScreen<ProtectionCore
         }
     }
 
+    @Override
+    public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTicks) {
+        this.renderBackground(graphics, mouseX, mouseY, partialTicks);
+        super.render(graphics, mouseX, mouseY, partialTicks);
+
+        var core = this.menu.getCore();
+        List<String> guests = core.getTrustedNames();
+        int x = (this.width - this.imageWidth) / 2;
+        int y = (this.height - this.imageHeight) / 2;
+
+        // --- 1. TÍTULOS DE LAS SECCIONES (Encima de los cuadros) ---
+        // Título sobre el EditBox de invitar
+        graphics.drawString(this.font, "§6§lInvitar Jugadores", x + 10, y + 22, 0xFFFFFF, false);
+
+        // --- 2. LÓGICA DE BOTÓN CLAN Y UPGRADE ---
+        boolean alreadyHasClan = core.getClanName() != null && !core.getClanName().isEmpty();
+        this.clanButton.active = guests.size() >= 3 && !alreadyHasClan;
+
+        if (alreadyHasClan) {
+            this.clanButton.setMessage(Component.literal("§8Clan: " + core.getClanName()));
+        } else {
+            this.clanButton.setMessage(Component.literal("Crear Clan"));
+        }
+
+        int currentLevel = core.getCoreLevel();
+        boolean isMax = currentLevel >= 5;
+
+        // --- 3. LÓGICA DE PERMISOS DINÁMICOS ---
+        String currentInput = nameInput.getValue().trim();
+        boolean hasName = !currentInput.isEmpty();
+
+        this.buildBtn.active = hasName;
+        this.interactBtn.active = hasName;
+        this.chestsBtn.active = hasName;
+
+        if (hasName) {
+            var perms = core.getPermissionsFor(currentInput);
+            this.buildToggle = perms.canBuild;
+            this.interactToggle = perms.canInteract;
+            this.chestsToggle = perms.canOpenChests;
+        } else {
+            this.buildToggle = this.interactToggle = this.chestsToggle = false;
+        }
+
+        this.buildBtn.setMessage(Component.literal("B: " + (buildToggle ? "§aON" : "§cOFF")));
+        this.interactBtn.setMessage(Component.literal("I: " + (interactToggle ? "§aON" : "§cOFF")));
+        this.chestsBtn.setMessage(Component.literal("C: " + (chestsToggle ? "§aON" : "§cOFF")));
+
+        // Renderizado de Nivel superior
+        Component levelText = Component.literal("Nivel " + currentLevel + (isMax ? " §6§l(MAX)" : ""));
+        graphics.drawString(this.font, levelText, x + 12, y + 13, 0x404040, false);
+
+        // --- 4. RENDERIZADO DE LISTA Y REQUISITOS ---
+        renderGuestList(graphics, mouseX, mouseY);
+        renderUpgradeRequirements(graphics);
+        renderNameSuggestions(graphics, mouseX, mouseY);
+
+        this.renderTooltip(graphics, mouseX, mouseY);
+    }
+
     private void renderGuestList(GuiGraphics graphics, int mouseX, int mouseY) {
         int x = (this.width - this.imageWidth) / 2;
         int y = (this.height - this.imageHeight) / 2;
 
-        List<String> guests = this.menu.getCore().getTrustedNames();
+        var core = this.menu.getCore();
+        List<String> guests = core.getTrustedNames();
+
         int listX = x - 105;
-        int listY = y + 20;
+        int listY = y + 10;
 
-        // Fondo de la lista
-        graphics.fill(listX, listY, listX + 100, listY + 130, 0x88000000);
-        graphics.drawString(this.font, "§6Invitados:", listX + 5, listY + 5, 0xFFFFFF);
+        // Fondo de la lista (un poco más largo para el título "Jugadores")
+        graphics.fill(listX, listY, listX + 100, listY + 135, 0x88000000);
 
+        // Título de la lista
+        graphics.drawString(this.font, "§6§lJugadores", listX + 5, listY + 5, 0xFFFFFF);
+
+        // --- RENDERIZAR OWNER ---
+        // Intentamos obtener el nombre real del dueño si está en el servidor
+        String ownerName = "Cargando...";
+        var ownerUUID = core.getOwnerUUID();
+        var profile = this.minecraft.getSingleplayerServer() != null ?
+                this.minecraft.getSingleplayerServer().getProfileCache().get(ownerUUID) :
+                this.minecraft.getConnection().getPlayerInfo(ownerUUID);
+
+        if (profile != null) {
+            ownerName = (profile instanceof net.minecraft.client.multiplayer.PlayerInfo info) ?
+                    info.getProfile().getName() : ((java.util.Optional<com.mojang.authlib.GameProfile>)profile).get().getName();
+        } else {
+            // Fallback si no lo encuentra: Mostramos "Líder"
+            ownerName = "Líder";
+        }
+
+        int ownerY = listY + 20;
+        graphics.drawString(this.font, "§e★ §f" + ownerName, listX + 5, ownerY, 0xFFAA00);
+
+        // --- RENDERIZAR RESTO DE JUGADORES ---
+        int offset = 1; // Empezamos debajo del owner
         for (int i = 0; i < guests.size(); i++) {
             String name = guests.get(i);
-            int entryY = listY + 20 + (i * 14);
+
+            // Evitamos duplicar si el dueño está en la lista de invitados por error
+            if (name.equalsIgnoreCase(ownerName)) continue;
+
+            int entryY = listY + 20 + (offset * 14);
             int removeBtnX = listX + 85;
 
             boolean isHoveringRemove = mouseX >= removeBtnX - 2 && mouseX <= removeBtnX + 12 &&
@@ -289,6 +317,7 @@ public class ProtectionCoreScreen extends AbstractContainerScreen<ProtectionCore
             graphics.drawString(this.font, name, listX + 5, entryY, isHoveringName ? 0xFFFFAA : 0xAAAAAA);
             graphics.drawString(this.font, "§c[X]", removeBtnX, entryY, isHoveringRemove ? 0xFFFFFF : 0xCC0000);
 
+            offset++;
         }
     }
 

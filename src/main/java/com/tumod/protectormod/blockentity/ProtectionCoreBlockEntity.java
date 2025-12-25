@@ -427,6 +427,17 @@ public class ProtectionCoreBlockEntity extends BlockEntity implements MenuProvid
         return this.ownerUUID != null ? this.ownerUUID : UUID.nameUUIDFromBytes("none".getBytes());
     }
 
+    // En ProtectionCoreBlockEntity.java
+    public String getOwnerName() {
+        // Si el servidor está disponible, buscamos el nombre por UUID
+        if (this.level != null && !this.level.isClientSide) {
+            // Lógica de servidor...
+        }
+        // En cliente, lo más fácil es que el dueño sea el que abrió la interfaz
+        // si no hay un sistema de sincronización de nombres de UUIDs.
+        return "Líder";
+    }
+
     public void setOwner(UUID uuid) { this.ownerUUID = uuid; markDirtyAndUpdate(); }
     public void setClanName(String name) { this.clanName = name; markDirtyAndUpdate(); }
     public String getClanName() { return this.clanName; }
