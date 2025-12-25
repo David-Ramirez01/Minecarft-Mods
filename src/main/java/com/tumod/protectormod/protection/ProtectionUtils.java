@@ -17,7 +17,7 @@ public class ProtectionUtils {
         }
 
         // Iteramos sobre la lista estática global de núcleos cargados
-        for (ProtectionCoreBlockEntity core : ProtectionCoreBlockEntity.CORES) {
+        for (ProtectionCoreBlockEntity core : ProtectionCoreBlockEntity.getLoadedCores()) {
 
             // 1. Verificar que el core sigue siendo válido y está en el mismo nivel
             if (core.isRemoved() || core.getLevel() != level) {

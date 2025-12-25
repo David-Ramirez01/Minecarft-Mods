@@ -22,41 +22,50 @@ public class FlagsScreen extends Screen {
 
     @Override
     protected void init() {
-        int startX = this.width / 2 - 135; // Centro de la pantalla desplazado a la izquierda
-        int startY = 40;
-        int columnWidth = 140;
+        int startX = this.width / 2 - 145; // Un poco más a la izquierda para centrar las dos columnas
+        int startY = 45;
         int buttonHeight = 20;
+        int columnWidth = 150;
 
-        List<String> allFlags = core.getAllFlagKeys();
+        boolean isOp = this.minecraft.player.hasPermissions(2);
 
-        for (int i = 0; i < allFlags.size(); i++) {
-            String flagId = allFlags.get(i);
-
-            // Calculamos posición en 2 columnas
-            int column = i / 10; // 10 botones por columna
-            int row = i % 10;
-            int x = startX + (column * columnWidth);
-            int y = startY + (row * (buttonHeight + 2));
-
-            // Creamos el botón dinámicamente
-            this.addRenderableWidget(Button.builder(
-                    Component.literal(capitalize(flagId) + ": ")
-                            .append(core.getFlag(flagId) ? Component.literal("§aON") : Component.literal("§cOFF")),
-                    b -> {
-                        PacketDistributor.sendToServer(new UpdateFlagPayload(core.getBlockPos(), flagId));
-                        // Invertimos localmente para feedback visual instantáneo
-                        core.setFlag(flagId, !core.getFlag(flagId));
-                        this.rebuildWidgets();
-                    }).bounds(x, y, 130, buttonHeight).build());
+        // --- COLUMNA 1: FLAGS BÁSICAS (Para todos) ---
+        List<String> basics = ProtectionCoreBlockEntity.BASIC_FLAGS;
+        for (int i = 0; i < basics.size(); i++) {
+            createFlagButton(basics.get(i), startX, startY + (i * 22));
         }
 
-        // Botón Volver (al final, centrado abajo)
+        // --- COLUMNA 2: FLAGS RESTRINGIDAS (Solo Admins) ---
+        if (isOp) {
+            List<String> restricted = ProtectionCoreBlockEntity.ADMIN_FLAGS;
+            for (int i = 0; i < restricted.size(); i++) {
+                // Dibujamos en la segunda columna (startX + columnWidth)
+                createFlagButton(restricted.get(i), startX + columnWidth, startY + (i * 22));
+            }
+        }
+
+        // Botón Volver
         this.addRenderableWidget(Button.builder(Component.literal("§lVolver"),
                         b -> this.minecraft.setScreen(lastScreen))
-                .bounds(this.width / 2 - 60, this.height - 30, 120, 20).build());
+                .bounds(this.width / 2 - 50, this.height - 35, 100, 20).build());
     }
 
-    // Método auxiliar para que los nombres se vean bonitos (ej: "pvp" -> "Pvp")
+    private void createFlagButton(String flagId, int x, int y) {
+        boolean active = core.getFlag(flagId);
+        // Usamos un color diferente para las flags de admin para que se distingan
+        boolean isAdminFlag = ProtectionCoreBlockEntity.ADMIN_FLAGS.contains(flagId);
+        String prefix = isAdminFlag ? "§4⚙ " : "§6• ";
+
+        this.addRenderableWidget(Button.builder(
+                Component.literal(prefix + capitalize(flagId) + ": ")
+                        .append(active ? Component.literal("§aON") : Component.literal("§cOFF")),
+                b -> {
+                    PacketDistributor.sendToServer(new UpdateFlagPayload(core.getBlockPos(), flagId));
+                    core.setFlag(flagId, !active);
+                    this.rebuildWidgets(); // Refresca los botones para mostrar el nuevo estado
+                }).bounds(x, y, 140, 20).build());
+    }
+
     private String capitalize(String str) {
         if (str == null || str.isEmpty()) return str;
         return str.substring(0, 1).toUpperCase() + str.substring(1).replace("-", " ");
@@ -65,12 +74,13 @@ public class FlagsScreen extends Screen {
     @Override
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTicks) {
         this.renderBackground(graphics, mouseX, mouseY, partialTicks);
-        graphics.drawCenteredString(this.font, this.title, this.width / 2, 20, 0xFFFFFF);
-        super.render(graphics, mouseX, mouseY, partialTicks);
-    }
 
-    @Override
-    public boolean isPauseScreen() {
-        return false;
+        // Títulos de columnas
+        graphics.drawCenteredString(this.font, "§e§lFLAGS BÁSICAS", this.width / 2 - 75, 30, 0xFFFFFF);
+        if (this.minecraft.player.hasPermissions(2)) {
+            graphics.drawCenteredString(this.font, "§4§lADMINISTRACIÓN", this.width / 2 + 75, 30, 0xFFFFFF);
+        }
+
+        super.render(graphics, mouseX, mouseY, partialTicks);
     }
 }

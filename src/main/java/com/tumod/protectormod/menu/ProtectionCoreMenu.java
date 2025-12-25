@@ -21,31 +21,19 @@ public class ProtectionCoreMenu extends AbstractContainerMenu {
     // 🔹 CONSTRUCTOR PARA EL SERVIDOR
     public ProtectionCoreMenu(MenuType<?> type, int id, Inventory playerInv, ProtectionCoreBlockEntity core) {
         super(type, id);
-
-        if (core == null) throw new IllegalStateException("ProtectionCoreBlockEntity is null");
-
         this.core = core;
         this.access = ContainerLevelAccess.create(core.getLevel(), core.getBlockPos());
 
-        // VERIFICACIÓN: ¿Es un Admin Core?
         boolean isAdminCore = core.getBlockState().is(ModBlocks.ADMIN_PROTECTOR.get());
 
-        // Solo añadimos los slots si NO es el Admin Core
         if (!isAdminCore) {
-            // Slot 0: Mejora
+            // --- NÚCLEO NORMAL: Slots en su posición original ---
             this.addSlot(new Slot(core.getInventory(), 0, 15, 105) {
-                @Override
-                public boolean mayPlace(ItemStack stack) {
-                    return stack.is(ModItems.PROTECTION_UPGRADE.get());
-                }
+                @Override public boolean mayPlace(ItemStack stack) { return stack.is(ModItems.PROTECTION_UPGRADE.get()); }
             });
-
-            // Slot 1: Coste
             this.addSlot(new Slot(core.getInventory(), 1, 35, 105) {
-                @Override
-                public boolean mayPlace(ItemStack stack) {
-                    int currentLevel = core.getCoreLevel();
-                    return switch (currentLevel) {
+                @Override public boolean mayPlace(ItemStack stack) {
+                    return switch (core.getCoreLevel()) {
                         case 1 -> stack.is(Items.IRON_INGOT);
                         case 2 -> stack.is(Items.GOLD_INGOT);
                         case 3 -> stack.is(Items.DIAMOND);
@@ -54,10 +42,29 @@ public class ProtectionCoreMenu extends AbstractContainerMenu {
                     };
                 }
             });
+            // Inventario del jugador en posición estándar (abajo)
+            addPlayerInventory(playerInv, 8, 140);
+            addPlayerHotbar(playerInv, 8, 198);
+        } else {
+            // --- ADMIN CORE ---
+            addPlayerInventory(playerInv, 8, 140);
+            addPlayerHotbar(playerInv, 8, 198);
         }
+    }
 
-        addPlayerInventory(playerInv);
-        addPlayerHotbar(playerInv);
+    // 🔹 MÉTODOS DE INVENTARIO CON COORDENADAS DINÁMICAS
+    private void addPlayerInventory(Inventory inv, int xStart, int yStart) {
+        for (int row = 0; row < 3; ++row) {
+            for (int col = 0; col < 9; ++col) {
+                this.addSlot(new Slot(inv, col + row * 9 + 9, xStart + col * 18, yStart + row * 18));
+            }
+        }
+    }
+
+    private void addPlayerHotbar(Inventory inv, int xStart, int yStart) {
+        for (int col = 0; col < 9; ++col) {
+            this.addSlot(new Slot(inv, col, xStart + col * 18, yStart));
+        }
     }
 
     // 🔹 CONSTRUCTOR PARA EL CLIENTE (Invocado por NeoForge)

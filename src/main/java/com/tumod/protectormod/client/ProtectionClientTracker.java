@@ -35,7 +35,7 @@ public class ProtectionClientTracker {
         Set<ProtectionCoreBlockEntity> coresHere = new HashSet<>();
 
         // Usamos la lista estática que definimos en la BlockEntity
-        for (ProtectionCoreBlockEntity core : ProtectionCoreBlockEntity.CORES) {
+        for (ProtectionCoreBlockEntity core : ProtectionCoreBlockEntity.getLoadedCores()) {
             // Verificamos si estamos en el mismo mundo y dentro del radio
             if (core.getLevel() == world && core.isInside(pos) && !core.isTrusted(player)) {
                 coresHere.add(core);

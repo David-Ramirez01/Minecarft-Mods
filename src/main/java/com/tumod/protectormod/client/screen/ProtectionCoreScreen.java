@@ -27,6 +27,7 @@ public class ProtectionCoreScreen extends AbstractContainerScreen<ProtectionCore
     private boolean buildToggle = false;
     private boolean interactToggle = false;
     private boolean chestsToggle = false;
+    private int suggestionIndex = -1;
     private Button clanButton;
     private String selectedGuest = "";
     private EditBox addPlayerInput;
@@ -224,10 +225,11 @@ public class ProtectionCoreScreen extends AbstractContainerScreen<ProtectionCore
 
     private void renderNameSuggestions(GuiGraphics graphics, int mouseX, int mouseY) {
         String input = nameInput.getValue();
-        if (input.length() < 2) return;
+        // Solo sugerir si hay texto y la caja tiene el foco
+        if (input.length() < 2 || !nameInput.isFocused()) return;
 
-        int x = (this.width - this.imageWidth) / 2 + 12;
-        int y = (this.height - this.imageHeight) / 2 + 52;
+        int x = (this.width - this.imageWidth) / 2 + 10;
+        int y = (this.height - this.imageHeight) / 2 + 45; // 32 (pos y) + 12 (alto) + 1 (margen)
 
         var connection = net.minecraft.client.Minecraft.getInstance().getConnection();
         if (connection == null) return;
@@ -239,14 +241,23 @@ public class ProtectionCoreScreen extends AbstractContainerScreen<ProtectionCore
                 .toList();
 
         int offset = 0;
-        for (String suggestion : matches) {
+        for (int i = 0; i < matches.size(); i++) {
+            String suggestion = matches.get(i);
             int sugY = y + offset;
-            graphics.fill(x, sugY, x + 150, sugY + 12, 0xCC222222);
-            boolean hovered = mouseX >= x && mouseX <= x + 150 && mouseY >= sugY && mouseY <= sugY + 12;
-            graphics.drawString(this.font, "§b" + suggestion, x + 5, sugY + 2, hovered ? 0xFFFFFF : 0xAAAAAA);
+            int width = 90; // Ancho exacto de tu nameInput
+
+            // Fondo: Si el índice de TAB coincide, resaltamos el fondo
+            int bgColor = (i == suggestionIndex) ? 0xEE444444 : 0xCC222222;
+            graphics.fill(x, sugY, x + width, sugY + 12, bgColor);
+
+            boolean hovered = mouseX >= x && mouseX <= x + width && mouseY >= sugY && mouseY <= sugY + 12;
+            if (hovered) graphics.fill(x, sugY, x + width, sugY + 12, 0x44FFFFFF);
+
+            graphics.drawString(this.font, "§b" + suggestion, x + 5, sugY + 2, hovered ? 0xFFFFFF : 0xAAAAAA, false);
 
             if (hovered && net.minecraft.client.Minecraft.getInstance().mouseHandler.isLeftPressed()) {
                 nameInput.setValue(suggestion);
+                suggestionIndex = -1;
             }
             offset += 13;
         }
@@ -343,6 +354,23 @@ public class ProtectionCoreScreen extends AbstractContainerScreen<ProtectionCore
             return true;
         }
 
+        if (keyCode == 258) { // Tecla TAB
+            String input = nameInput.getValue();
+            var connection = net.minecraft.client.Minecraft.getInstance().getConnection();
+
+            if (connection != null && input.length() >= 2) {
+                List<String> matches = connection.getOnlinePlayers().stream()
+                        .map(p -> p.getProfile().getName())
+                        .filter(name -> name.toLowerCase().startsWith(input.toLowerCase()))
+                        .toList();
+
+                if (!matches.isEmpty()) {
+                    suggestionIndex = (suggestionIndex + 1) % matches.size();
+                    nameInput.setValue(matches.get(suggestionIndex));
+                    return true;
+                }
+            }
+        }
         // Si estás escribiendo, ESC quita el foco, no cierra la GUI de golpe
         if (this.nameInput.isFocused()) {
             if (keyCode == 256) { // ESC

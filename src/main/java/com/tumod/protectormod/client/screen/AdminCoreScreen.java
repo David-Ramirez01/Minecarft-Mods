@@ -22,31 +22,30 @@ public class AdminCoreScreen extends AbstractContainerScreen<ProtectionCoreMenu>
 
     public AdminCoreScreen(ProtectionCoreMenu menu, Inventory inventory, Component title) {
         super(menu, inventory, title);
-        this.core = menu.getBlockEntity(); // Cambiado para usar el getter correcto
+        this.core = menu.getBlockEntity();
         this.imageWidth = 176;
-        this.imageHeight = 166; // Altura estándar de GUI pequeña
+        this.imageHeight = 222;
     }
 
     @Override
     protected void init() {
         super.init();
+        // 🔹 TRUCO: Enviamos las etiquetas automáticas fuera de la pantalla
+        this.titleLabelY = -1000;
+        this.inventoryLabelY = - 94;
+
         int x = this.leftPos;
         int y = this.topPos;
 
-        // 1. Entrada de Radio (Para que el Admin defina el área)
         this.radiusInput = new EditBox(this.font, x + 80, y + 25, 50, 18, Component.literal("Radio"));
         this.radiusInput.setValue(String.valueOf(core.getRadius()));
         this.radiusInput.setFilter(s -> s.matches("\\d*"));
         this.addRenderableWidget(this.radiusInput);
 
-        // 2. BOTÓN PRINCIPAL: Abrir Menú de las 20 Flags
-        // Este botón reemplaza a los interruptores individuales para limpiar la GUI
         this.addRenderableWidget(Button.builder(Component.literal("🚩 CONFIGURAR FLAGS"), b -> {
-            // Aquí abrimos la sub-pantalla que ya maneja todas las protecciones
             this.minecraft.setScreen(new FlagsScreen(this, core));
         }).bounds(x + 20, y + 55, 136, 20).build());
 
-        // 3. Botón de Confirmar Radio y Sincronizar
         this.addRenderableWidget(Button.builder(Component.literal("✅ Aplicar Cambios"), b -> {
             applyChanges();
         }).bounds(x + 20, y + 80, 136, 20).build());
@@ -55,12 +54,11 @@ public class AdminCoreScreen extends AbstractContainerScreen<ProtectionCoreMenu>
     private void applyChanges() {
         try {
             int newRadius = Integer.parseInt(radiusInput.getValue());
-            // Sincronizamos con el servidor usando tu Payload
             PacketDistributor.sendToServer(new UpdateAdminCorePayload(
                     core.getBlockPos(),
                     newRadius,
                     core.getFlag("pvp"),
-                    !core.getFlag("explosions") // Invertido si tu payload espera 'disabled'
+                    !core.getFlag("explosions")
             ));
             this.minecraft.player.displayClientMessage(Component.literal("§aÁrea de administración actualizada."), true);
         } catch (NumberFormatException e) {
@@ -71,17 +69,25 @@ public class AdminCoreScreen extends AbstractContainerScreen<ProtectionCoreMenu>
     @Override
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTicks) {
         this.renderBackground(graphics, mouseX, mouseY, partialTicks);
+        // Llamar a super.render() aquí es vital para que se dibujen los ítems del inventario
         super.render(graphics, mouseX, mouseY, partialTicks);
-
-        // Dibujamos los textos informativos
-        graphics.drawString(this.font, "§4§lADMIN PROTECTOR", this.leftPos + 35, this.topPos + 8, 0xFFFFFF, false);
-        graphics.drawString(this.font, "Radio:", this.leftPos + 25, this.topPos + 30, 0x404040, false);
-
         this.renderTooltip(graphics, mouseX, mouseY);
+    }
+
+     @Override
+    protected void renderLabels(GuiGraphics graphics, int mouseX, int mouseY) {
+        // Dibujamos los textos aquí (se dibujan RELATIVOS a leftPos/topPos automáticamente)
+        graphics.drawString(this.font, "§4§lADMIN PROTECTOR", 35, 8, 0xFFFFFF, false);
+        graphics.drawString(this.font, "Radio:", 35, 30, 0x404040, false);
     }
 
     @Override
     protected void renderBg(GuiGraphics graphics, float partialTicks, int mouseX, int mouseY) {
-        graphics.blit(TEXTURE, this.leftPos, this.topPos, 0, 0, this.imageWidth, this.imageHeight);
+        int x = (this.width - this.imageWidth) / 2;
+        int y = (this.height - this.imageHeight) / 2;
+
+        // Renderiza el fondo del cofre doble
+        graphics.blit(TEXTURE, x, y, 0, 0, this.imageWidth, this.imageHeight);
     }
+
 }

@@ -67,7 +67,7 @@ public class AdminProtectionEvents {
             }
         }
 
-        for (ProtectionCoreBlockEntity core : ProtectionCoreBlockEntity.CORES) {
+        for (ProtectionCoreBlockEntity core : ProtectionCoreBlockEntity.getLoadedCores()) {
             if (core.getLevel() == level && core.isInside(pos)) {
                 if (core instanceof AdminProtectorBlockEntity) {
                     if (!player.hasPermissions(2)) {
@@ -86,7 +86,7 @@ public class AdminProtectionEvents {
 
     // --- UTILIDAD UNIFICADA ---
     private static boolean isAdminArea(Level level, BlockPos pos) {
-        for (ProtectionCoreBlockEntity core : ProtectionCoreBlockEntity.CORES) {
+        for (ProtectionCoreBlockEntity core : ProtectionCoreBlockEntity.getLoadedCores()) {
             if (core instanceof AdminProtectorBlockEntity && core.getLevel() == level && core.isInside(pos)) {
                 return true;
             }
