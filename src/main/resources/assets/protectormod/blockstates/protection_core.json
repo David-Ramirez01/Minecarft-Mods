@@ -1,6 +1,10 @@
 {
   "variants": {
-    "half=lower": { "model": "protectormod:block/protection_core" },
-    "half=upper": { "model": "protectormod:block/protection_core", "y": 0, "uvlock": false }
+    "half=lower": {
+      "model": "protectormod:block/protection_core"
+    },
+    "half=upper": {
+      "model": "protectormod:block/empty"
+    }
   }
 }
