@@ -1,5 +1,6 @@
 package com.tumod.protectormod.blockentity;
 
+import com.tumod.protectormod.block.ProtectionCoreBlock;
 import com.tumod.protectormod.menu.ProtectionCoreMenu;
 import com.tumod.protectormod.registry.*;
 import net.minecraft.core.BlockPos;
@@ -68,9 +69,13 @@ public class ProtectionCoreBlockEntity extends BlockEntity implements MenuProvid
     public void onLoad() {
         super.onLoad();
         if (!this.level.isClientSide) {
-            // Limpiamos cualquier referencia vieja en la misma posición para evitar duplicados
-            LOADED_CORES.removeIf(core -> core.isRemoved() || core.getBlockPos().equals(this.worldPosition));
-            LOADED_CORES.add(this);
+            // Verificación de seguridad: solo registrar si somos la base
+            if (this.getBlockState().hasProperty(ProtectionCoreBlock.HALF) &&
+                    this.getBlockState().getValue(ProtectionCoreBlock.HALF) == net.minecraft.world.level.block.state.properties.DoubleBlockHalf.LOWER) {
+
+                LOADED_CORES.removeIf(core -> core.isRemoved() || core.getBlockPos().equals(this.worldPosition));
+                LOADED_CORES.add(this);
+            }
         }
     }
 
@@ -192,11 +197,11 @@ public class ProtectionCoreBlockEntity extends BlockEntity implements MenuProvid
     }
 
     public static final List<String> BASIC_FLAGS = List.of(
-            "pvp", "build", "chests", "interact", "explosions" , "villager-trade"
+            "pvp", "build", "chests", "interact", "villager-trade", "fire-damage" // Añadido aquí
     );
 
     public static final List<String> ADMIN_FLAGS = List.of(
-            "explosions", "mob-spawn", "entry", "fall-damage", "fire-spread" , "lighter" , "item-pickup"
+            "explosions", "mob-spawn", "entry", "fall-damage", "fire-spread", "lighter", "item-pickup"
     );
 
     // En ProtectionCoreBlockEntity.java
@@ -256,10 +261,25 @@ public class ProtectionCoreBlockEntity extends BlockEntity implements MenuProvid
 
     public void initializeDefaultFlags() {
         this.flags.clear();
+
+        // Obtenemos todas las claves posibles
         for (String f : getAllFlagKeys()) {
+            /*
+             * Lógica de inicialización:
+             * TRUE = La acción está PERMITIDA (Menos protección)
+             * FALSE = La acción está BLOQUEADA (Más protección)
+             */
+
             if (f.equals("entry")) {
+                // Permitimos la entrada a la zona por defecto
                 flags.put(f, true);
-            } else {
+            }
+            else if (f.equals("fire-spread") || f.equals("fire-damage") || f.equals("explosions")) {
+                // Estas flags de ADMIN deben ser FALSE por defecto para asegurar protección total
+                flags.put(f, false);
+            }
+            else {
+                // El resto de flags (pvp, build, etc.) se inicializan protegidas (false)
                 flags.put(f, false);
             }
         }
@@ -305,7 +325,26 @@ public class ProtectionCoreBlockEntity extends BlockEntity implements MenuProvid
     }
 
     public List<String> getAllFlagKeys() {
-        return List.of("pvp", "explosions", "break", "build", "interact", "chests", "mob-spawn", "mob-grief", "fire-spread", "use-buckets", "item-pickup", "item-drop", "crop-trample", "lighter", "damage-animals", "villager-trade", "entry", "enderpearl", "fall-damage", "hunger");
+        return List.of("pvp", "explosions", "break", "build", "interact", "chests",
+                "mob-spawn", "mob-grief", "fire-spread", "fire-damage", // <--- Nueva
+                "use-buckets", "item-pickup", "item-drop", "crop-trample",
+                "lighter", "damage-animals", "villager-trade", "entry",
+                "enderpearl", "fall-damage", "hunger");
+    }
+
+    /**
+     * Controla si el fuego puede propagarse en el área.
+     * @param enabled true permite el fuego, false lo bloquea.
+     */
+    public void setFireSpread(boolean enabled) {
+        this.setFlag("fire-spread", enabled);
+    }
+
+    /**
+     * Controla si las entidades reciben daño por fuego/lava.
+     */
+    public void setFireDamage(boolean enabled) {
+        this.setFlag("fire-damage", enabled);
     }
 
     public boolean getFlag(String flag) { return flags.getOrDefault(flag, false); }
@@ -389,6 +428,12 @@ public class ProtectionCoreBlockEntity extends BlockEntity implements MenuProvid
         if (level != null) {
             level.sendBlockUpdated(worldPosition, getBlockState(), getBlockState(), 3);
         }
+    }
+
+    public net.minecraft.world.phys.AABB getRenderBoundingBox() {
+        // Expandimos el cuadro de renderizado para cubrir 2 bloques de altura (0 a 2)
+        // Esto evita que el modelo desaparezca al mirar hacia arriba
+        return new net.minecraft.world.phys.AABB(worldPosition).expandTowards(0, 1, 0);
     }
 
     public void setCoreLevelClient(int level) {

@@ -6,12 +6,14 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.damagesource.DamageTypes;
 import net.minecraft.world.entity.monster.Monster;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
+import net.neoforged.neoforge.event.entity.living.LivingDamageEvent;
 import net.neoforged.neoforge.event.entity.living.LivingIncomingDamageEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
 import net.neoforged.neoforge.event.level.BlockEvent;
@@ -27,14 +29,14 @@ public class ProtectionEvent {
 
     private static final Map<UUID, Boolean> PLAYER_INSIDE_CACHE = new HashMap<>();
 
-    // --- 1. GESTIÓN DE BLOQUES (ROMPER / CONSTRUIR) ---
+    // --- 1. GESTIÓN DE BLOQUES Y FUEGO ---
 
     @SubscribeEvent
     public static void onBlockBreak(BlockEvent.BreakEvent event) {
         Player player = event.getPlayer();
-        if (isActionRestricted(player, event.getPos(), "build", true)) {
+        if (isActionRestricted(player, event.getPos(), "break", true)) {
             event.setCanceled(true);
-            player.displayClientMessage(Component.literal("§c[!] No puedes romper bloques en esta propiedad."), true);
+            player.displayClientMessage(Component.literal("§c[!] No puedes romper bloques aquí."), true);
         }
     }
 
@@ -48,46 +50,29 @@ public class ProtectionEvent {
         }
     }
 
-    // --- 2. INTERACCIONES (BLOQUES, COFRES, ALDEANOS) ---
-
+    // FLAG: fire-spread (Previene que el fuego se propague a bloques vecinos)
     @SubscribeEvent
-    public static void onInteractBlock(PlayerInteractEvent.RightClickBlock event) {
-        BlockPos pos = event.getPos();
-        Player player = event.getEntity();
-        Level level = player.level();
-
-        ProtectionCoreBlockEntity core = findCoreAt(level, pos);
-        if (core == null || canBypass(player, core)) return;
-
-        // Identificar si es un contenedor (Cofre, Horno, etc.)
-        boolean isContainer = level.getBlockEntity(pos) != null &&
-                !(level.getBlockEntity(pos) instanceof ProtectionCoreBlockEntity);
-
-        String flagNeeded = isContainer ? "chests" : "interact";
-
-        if (!core.hasPermission(player, flagNeeded) && !core.getFlag(flagNeeded)) {
+    public static void onFireSpread(BlockEvent.NeighborNotifyEvent event) {
+        ProtectionCoreBlockEntity core = findCoreAt((Level) event.getLevel(), event.getPos());
+        if (core != null && !core.getFlag("fire-spread")) {
+            // Si el bloque vecino es fuego, cancelamos la notificación para que no se extienda
             event.setCanceled(true);
-            if (isContainer) {
-                player.displayClientMessage(Component.literal("§c[!] Los contenedores están protegidos."), true);
+        }
+    }
+
+    // FLAG: lighter (Previene encender fuego con mechero)
+    @SubscribeEvent
+    public static void onLighterUse(PlayerInteractEvent.RightClickBlock event) {
+        if (event.getItemStack().getItem() instanceof net.minecraft.world.item.FlintAndSteelItem) {
+            ProtectionCoreBlockEntity core = findCoreAt(event.getLevel(), event.getPos());
+            if (core != null && !canBypass(event.getEntity(), core) && !core.getFlag("lighter")) {
+                event.setCanceled(true);
+                event.getEntity().displayClientMessage(Component.literal("§c[!] El uso de mecheros está prohibido aquí."), true);
             }
         }
     }
 
-    @SubscribeEvent
-    public static void onInteractEntity(PlayerInteractEvent.EntityInteract event) {
-        Player player = event.getEntity();
-        ProtectionCoreBlockEntity core = findCoreAt(player.level(), event.getTarget().blockPosition());
-
-        if (core == null || canBypass(player, core)) return;
-
-        // Protege Aldeanos y entidades de interacción
-        if (!core.hasPermission(player, "interact") && !core.getFlag("interact")) {
-            event.setCanceled(true);
-            player.displayClientMessage(Component.literal("§c[!] Las entidades están protegidas aquí."), true);
-        }
-    }
-
-    // --- 3. DAÑO, EXPLOSIONES Y MOBS ---
+    // --- 2. DAÑO Y EXPLOSIONES ---
 
     @SubscribeEvent
     public static void onDamage(LivingIncomingDamageEvent event) {
@@ -98,8 +83,14 @@ public class ProtectionEvent {
         if (event.getSource().getEntity() instanceof Player && event.getEntity() instanceof Player) {
             if (!core.getFlag("pvp")) event.setCanceled(true);
         }
-        // Caída
-        if (event.getSource().is(net.minecraft.world.damagesource.DamageTypes.FALL)) {
+
+        // Daño por Fuego (FLAG: fire-damage)
+        if (event.getSource().is(DamageTypes.IN_FIRE) || event.getSource().is(DamageTypes.ON_FIRE) || event.getSource().is(DamageTypes.LAVA)) {
+            if (!core.getFlag("fire-damage")) event.setCanceled(true);
+        }
+
+        // Caída (FLAG: fall-damage)
+        if (event.getSource().is(DamageTypes.FALL)) {
             if (!core.getFlag("fall-damage")) event.setCanceled(true);
         }
     }
@@ -113,17 +104,29 @@ public class ProtectionEvent {
         }
     }
 
+    // --- 3. INTERACCIONES ---
+
     @SubscribeEvent
-    public static void onMobSpawn(net.neoforged.neoforge.event.entity.EntityJoinLevelEvent event) {
-        if (event.getEntity() instanceof Monster) {
-            ProtectionCoreBlockEntity core = findCoreAt(event.getLevel(), event.getEntity().blockPosition());
-            if (core != null && !core.getFlag("mob-spawn")) {
-                event.setCanceled(true);
-            }
+    public static void onInteractBlock(PlayerInteractEvent.RightClickBlock event) {
+        BlockPos pos = event.getPos();
+        Player player = event.getEntity();
+        Level level = player.level();
+
+        ProtectionCoreBlockEntity core = findCoreAt(level, pos);
+        if (core == null || canBypass(player, core)) return;
+
+        boolean isContainer = level.getBlockEntity(pos) != null &&
+                !(level.getBlockEntity(pos) instanceof ProtectionCoreBlockEntity);
+
+        String flagNeeded = isContainer ? "chests" : "interact";
+
+        if (!core.hasPermission(player, flagNeeded) && !core.getFlag(flagNeeded)) {
+            event.setCanceled(true);
+            if (isContainer) player.displayClientMessage(Component.literal("§c[!] Los contenedores están protegidos."), true);
         }
     }
 
-    // --- 4. TICKS (HAMBRE Y ENTRADA) ---
+    // --- 4. TICKS Y AUXILIARES ---
 
     @SubscribeEvent
     public static void onPlayerTick(PlayerTickEvent.Post event) {
@@ -131,34 +134,22 @@ public class ProtectionEvent {
         if (player.level().isClientSide || player.tickCount % 5 != 0) return;
 
         ProtectionCoreBlockEntity core = findCoreAt(player.level(), player.blockPosition());
-
-        // Lógica de Mensaje de Entrada/Salida
         updateEntryMessage(player, core != null);
 
         if (core != null) {
-            // Hambre (Si la flag está OFF, restaurar hambre)
-            if (!core.getFlag("hunger")) {
-                player.getFoodData().setFoodLevel(20);
-            }
-
-            // Expulsión (Flag Entry)
+            if (!core.getFlag("hunger")) player.getFoodData().setFoodLevel(20);
             if (!core.getFlag("entry") && !core.hasPermission(player, "entry") && !player.hasPermissions(2)) {
                 ejectPlayer(player, core);
             }
         }
     }
 
-    // --- MÉTODOS AUXILIARES ---
-
-    // Si prefieres flags independientes:
     private static boolean isActionRestricted(Player player, BlockPos pos, String permission, boolean isBreak) {
         if (player.hasPermissions(2)) return false;
         ProtectionCoreBlockEntity core = findCoreAt(player.level(), pos);
         if (core == null) return false;
-
         if (canBypass(player, core) || core.hasPermission(player, "build")) return false;
 
-        // Si es ruptura, miramos flag 'break'. Si es colocar, miramos flag 'build'.
         String flagToCheck = isBreak ? "break" : "build";
         return !core.getFlag(flagToCheck);
     }
@@ -179,7 +170,6 @@ public class ProtectionEvent {
         Vec3 exitDir = player.position().subtract(coreCenter).normalize();
         double radius = core.getRadius() + 1.5;
         Vec3 exitPoint = coreCenter.add(exitDir.scale(radius));
-
         player.teleportTo(exitPoint.x, player.getY(), exitPoint.z);
         player.displayClientMessage(Component.literal("§c§l[!] §cEntrada restringida."), true);
     }
@@ -191,6 +181,7 @@ public class ProtectionEvent {
         if (wasInside && !isInside) player.displayClientMessage(Component.literal("§aSaliste de zona protegida"), true);
         PLAYER_INSIDE_CACHE.put(uuid, isInside);
     }
+
 
     private static void renderAreaParticles(ServerLevel level, Player player) {
         for (ProtectionCoreBlockEntity core : ProtectionCoreBlockEntity.getLoadedCores()) {
@@ -231,6 +222,4 @@ public class ProtectionEvent {
             }
         }
     }
-
-
 }

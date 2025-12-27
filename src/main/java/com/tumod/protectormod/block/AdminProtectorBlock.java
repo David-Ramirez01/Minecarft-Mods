@@ -20,11 +20,8 @@ import org.jetbrains.annotations.Nullable;
 // AÑADIR "implements EntityBlock"
 public class AdminProtectorBlock extends Block implements EntityBlock {
 
-    public AdminProtectorBlock() {
-        super(Block.Properties.of()
-                .mapColor(MapColor.COLOR_RED)
-                .strength(-1.0F, 3600000.0F)
-                .noLootTable());
+    public AdminProtectorBlock(Properties properties) {
+        super(properties);
     }
 
     // ESTE MÉTODO ES OBLIGATORIO PARA QUE EXISTA LA BLOCK ENTITY
