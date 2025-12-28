@@ -9,11 +9,13 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.damagesource.DamageTypes;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
+import com.tumod.protectormod.command.ClanCommands;
 import net.neoforged.neoforge.event.entity.living.LivingIncomingDamageEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
 import net.neoforged.neoforge.event.level.BlockEvent;
@@ -112,21 +114,35 @@ public class ProtectionEvent {
     @SubscribeEvent
     public static void onPlayerTick(PlayerTickEvent.Post event) {
         Player player = event.getEntity();
-        // Ejecutar solo en el servidor y cada 20 ticks (1 segundo)
-        if (player.level().isClientSide || player.tickCount % 20 != 0) return;
+        if (player.level().isClientSide) return;
 
-        ProtectionCoreBlockEntity core = findCoreAt(player.level(), player.blockPosition());
+        ServerLevel level = (ServerLevel) player.level();
 
-        // --- LLAMADA AL MENSAJE (DEBE ESTAR AQUÍ) ---
-        updateEntryMessage(player, core);
+        // 1. LÓGICA DEL VISUALIZADOR (Cada 10 ticks para mayor fluidez visual)
+        if (player.tickCount % 10 == 0) {
+            if (ClanCommands.VISUALIZER_ENABLED.contains(player.getUUID())) {
+                renderAreaParticles(level, player);
+            }
+        }
 
-        // Lógica de hambre y expulsión
-        if (core != null) {
-            if (!core.getFlag("hunger")) player.getFoodData().setFoodLevel(20);
+        // 2. LÓGICA DE PROTECCIÓN Y MENSAJES (Cada 20 ticks / 1 segundo)
+        if (player.tickCount % 20 == 0) {
+            ProtectionCoreBlockEntity core = findCoreAt(level, player.blockPosition());
 
-            // Si la entrada está prohibida y el jugador no es dueño/invitado, expulsar
-            if (!core.getFlag("entry") && !canBypass(player, core)) {
-                ejectPlayer(player, core);
+            // --- LLAMADA AL MENSAJE ---
+            updateEntryMessage(player, core);
+
+            // Lógica de flags pasivas
+            if (core != null) {
+                // Flag de Hambre (Si es false, el jugador no tiene hambre)
+                if (!core.getFlag("hunger")) {
+                    player.getFoodData().setFoodLevel(20);
+                }
+
+                // Flag de Entrada (Expulsión)
+                if (!core.getFlag("entry") && !canBypass(player, core)) {
+                    ejectPlayer(player, core);
+                }
             }
         }
     }
@@ -213,6 +229,32 @@ public class ProtectionEvent {
             return findCoreAt(level, pos.below());
         }
         return null;
+    }
+
+    @SubscribeEvent
+    public static void onFireSpread(BlockEvent.PortalSpawnEvent event) {
+        // Nota: Algunas versiones usan BlockEvent.NeighborNotifyEvent o eventos de tick de bloque
+    }
+
+    @SubscribeEvent
+    public static void onFireTick(BlockEvent.FarmlandTrampleEvent event) { /* ... */ }
+
+    // RECOMENDADO: Usa este evento para detectar fuego intentando colocarse
+    @SubscribeEvent
+    public static void onFirePlace(BlockEvent.EntityPlaceEvent event) {
+        // Verificamos si lo que se intenta colocar es fuego
+        if (event.getState().is(Blocks.FIRE) || event.getState().is(Blocks.SOUL_FIRE)) {
+
+            // Convertimos LevelAccessor a Level de forma segura
+            if (event.getLevel() instanceof Level world) {
+                ProtectionCoreBlockEntity core = findCoreAt(world, event.getPos());
+
+                // Si hay protección y la flag de propagación/fuego está desactivada (false)
+                if (core != null && !core.getFlag("fire-spread")) {
+                    event.setCanceled(true);
+                }
+            }
+        }
     }
 
     private static boolean canBypass(Player player, ProtectionCoreBlockEntity core) {

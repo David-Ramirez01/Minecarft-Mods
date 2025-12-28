@@ -1,16 +1,14 @@
 package com.tumod.protectormod.event;
 
 import com.tumod.protectormod.ProtectorMod;
-import com.tumod.protectormod.block.AdminProtectorBlock;
-import com.tumod.protectormod.block.ProtectionCoreBlock;
-import com.tumod.protectormod.blockentity.AdminProtectorBlockEntity;
 import com.tumod.protectormod.blockentity.ProtectionCoreBlockEntity;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
-import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.damagesource.DamageTypes;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.LevelAccessor;
+import net.minecraft.world.level.block.Blocks;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.event.entity.living.LivingIncomingDamageEvent;
@@ -20,77 +18,88 @@ import net.neoforged.neoforge.event.level.ExplosionEvent;
 @EventBusSubscriber(modid = ProtectorMod.MOD_ID)
 public class AdminProtectionEvents {
 
+    private static ProtectionCoreBlockEntity findCoreAt(LevelAccessor level, BlockPos pos) {
+        for (ProtectionCoreBlockEntity core : ProtectionCoreBlockEntity.getLoadedCores()) {
+            if (core.getLevel() == level && core.isInside(pos)) {
+                return core;
+            }
+        }
+        return null;
+    }
+
     // 1. EXPLOSIONES
     @SubscribeEvent
     public static void onExplosion(ExplosionEvent.Detonate event) {
         Level level = event.getLevel();
-        if (level.isClientSide) return;
-
-        event.getAffectedBlocks().removeIf(pos -> isAdminArea(level, pos));
-        event.getAffectedEntities().removeIf(entity -> isAdminArea(level, entity.blockPosition()));
+        event.getAffectedBlocks().removeIf(pos -> {
+            ProtectionCoreBlockEntity core = findCoreAt(level, pos);
+            return core != null && !core.getFlag("explosions");
+        });
     }
 
-    // 2. DAÑO (PVP y MOBS)
+    // 2. DAÑO (PVP y Fuego)
     @SubscribeEvent
     public static void onDamage(LivingIncomingDamageEvent event) {
-        LivingEntity victim = event.getEntity();
-        Level level = victim.level();
+        Level level = event.getEntity().level();
+        ProtectionCoreBlockEntity core = findCoreAt(level, event.getEntity().blockPosition());
 
-        if (isAdminArea(level, victim.blockPosition())) {
-            // Bloquea el daño si proviene de otra entidad (Jugador o Mob)
-            if (event.getSource().getEntity() != null) {
+        if (core != null) {
+            // Flag: fire-damage
+            if (event.getSource().is(DamageTypes.IN_FIRE) || event.getSource().is(DamageTypes.LAVA) || event.getSource().is(DamageTypes.ON_FIRE)) {
+                if (!core.getFlag("fire-damage")) {
+                    event.setCanceled(true);
+                    event.getEntity().setRemainingFireTicks(0);
+                }
+            }
+            // Flag: pvp
+            if (event.getSource().getEntity() instanceof Player && !core.getFlag("pvp")) {
                 event.setCanceled(true);
             }
         }
     }
 
-
-    // 3. ROMPER BLOQUES (ADMIN Y NORMAL)
+    // 3. FUEGO (Propagación)
+    // Nota: Si BurnEvent no existe en tu MDK, usa NeighborNotifyEvent o el chequeo de EntityPlaceEvent
     @SubscribeEvent
-    public static void onBlockBreak(BlockEvent.BreakEvent event) {
-        if (event.getLevel().isClientSide()) return;
-        Level level = (Level) event.getLevel();
-        Player player = event.getPlayer();
-        BlockPos pos = event.getPos();
-
-        Block block = event.getState().getBlock();
-        if (block instanceof ProtectionCoreBlock || block instanceof AdminProtectorBlock) {
-            if (level.getBlockEntity(pos) instanceof ProtectionCoreBlockEntity core) {
-                boolean isOp = player.hasPermissions(2);
-                boolean isOwner = player.getUUID().equals(core.getOwnerUUID());
-
-                if (!isOp && !isOwner) {
-                    event.setCanceled(true);
-                    player.displayClientMessage(Component.literal("§cNo tienes permiso para retirar este protector."), true);
-                    return;
-                }
-            }
-        }
-
-        for (ProtectionCoreBlockEntity core : ProtectionCoreBlockEntity.getLoadedCores()) {
-            if (core.getLevel() == level && core.isInside(pos)) {
-                if (core instanceof AdminProtectorBlockEntity) {
-                    if (!player.hasPermissions(2)) {
-                        event.setCanceled(true);
-                        player.displayClientMessage(Component.literal("§4Zona Administrativa: No puedes modificar bloques aquí."), true);
-                        return;
-                    }
-                } else if (!core.isTrusted(player)) {
-                    event.setCanceled(true);
-                    player.displayClientMessage(Component.literal("§cEste terreno está protegido."), true);
-                    return;
-                }
+    public static void onFireSpread(BlockEvent.EntityPlaceEvent event) {
+        if (event.getState().is(Blocks.FIRE) || event.getState().is(Blocks.SOUL_FIRE)) {
+            ProtectionCoreBlockEntity core = findCoreAt(event.getLevel(), event.getPos());
+            if (core != null && !core.getFlag("fire-spread")) {
+                event.setCanceled(true);
             }
         }
     }
 
-    // --- UTILIDAD UNIFICADA ---
-    private static boolean isAdminArea(Level level, BlockPos pos) {
-        for (ProtectionCoreBlockEntity core : ProtectionCoreBlockEntity.getLoadedCores()) {
-            if (core instanceof AdminProtectorBlockEntity && core.getLevel() == level && core.isInside(pos)) {
-                return true;
+    // 4. CONSTRUCCIÓN Y DESTRUCCIÓN (Corregido para 1.21.1)
+    @SubscribeEvent
+    public static void onBlockPlace(BlockEvent.EntityPlaceEvent event) {
+        if (event.getEntity() instanceof Player player) {
+            if (isActionRestricted(player, event.getLevel(), event.getPos(), "build")) {
+                event.setCanceled(true);
+                player.displayClientMessage(Component.literal("§cZona protegida: No puedes construir."), true);
             }
         }
-        return false;
+    }
+
+    @SubscribeEvent
+    public static void onBlockBreak(BlockEvent.BreakEvent event) {
+        Player player = event.getPlayer();
+        if (isActionRestricted(player, event.getLevel(), event.getPos(), "break")) {
+            event.setCanceled(true);
+            player.displayClientMessage(Component.literal("§cZona protegida: No puedes romper."), true);
+        }
+    }
+
+    private static boolean isActionRestricted(Player player, LevelAccessor level, BlockPos pos, String flag) {
+        if (player.hasPermissions(2)) return false;
+
+        ProtectionCoreBlockEntity core = findCoreAt(level, pos);
+        if (core == null) return false;
+
+        if (player.getUUID().equals(core.getOwnerUUID()) || core.hasPermission(player, "build")) {
+            return false;
+        }
+
+        return !core.getFlag(flag);
     }
 }
