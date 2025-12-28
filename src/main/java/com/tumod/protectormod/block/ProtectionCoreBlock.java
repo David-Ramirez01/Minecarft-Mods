@@ -84,8 +84,7 @@ public class ProtectionCoreBlock extends Block implements EntityBlock {
     public void setPlacedBy(Level level, BlockPos pos, BlockState state, @Nullable LivingEntity placer, ItemStack stack) {
         if (level.isClientSide || !(placer instanceof Player player)) return;
 
-        // 1. VALIDACIÓN DE ALTURA: Evita que la estatua atraviese techos
-        // Como el modelo mide 32 píxeles (2 bloques), verificamos el bloque de arriba
+        // 1. VALIDACIÓN DE ALTURA
         if (!level.getBlockState(pos.above()).isAir() && !level.getBlockState(pos.above()).canBeReplaced()) {
             cancelarColocacion(level, pos, player, stack, "§c[!] No hay espacio suficiente (necesitas 2 bloques de alto).");
             return;
@@ -95,11 +94,9 @@ public class ProtectionCoreBlock extends Block implements EntityBlock {
         com.tumod.protectormod.util.ClanSavedData data = com.tumod.protectormod.util.ClanSavedData.get(sLevel);
 
         // 2. COMPROBAR SUPERPOSICIÓN
-        // Usamos 16 como radio base para la comprobación inicial
         int radioNuevo = 16;
         for (var existingCore : com.tumod.protectormod.blockentity.ProtectionCoreBlockEntity.getLoadedCores()) {
             if (existingCore.getBlockPos().equals(pos)) continue;
-
             if (existingCore.areaOverlaps(pos, radioNuevo)) {
                 if (!existingCore.getOwnerUUID().equals(player.getUUID()) && !player.hasPermissions(2)) {
                     cancelarColocacion(level, pos, player, stack, "§c[!] Esta zona ya está protegida por otro núcleo.");
@@ -108,26 +105,28 @@ public class ProtectionCoreBlock extends Block implements EntityBlock {
             }
         }
 
-        // 3. COMPROBAR LÍMITE DE NÚCLEOS POR JUGADOR
-        int currentCores = data.getPlayerCoreCount(player.getUUID());
-        if (!player.hasPermissions(2) && currentCores >= data.serverMaxCores) {
-            cancelarColocacion(level, pos, player, stack, "§c[!] Límite alcanzado: §e" + data.serverMaxCores + " núcleos.");
-            return;
+        // 3. COMPROBAR LÍMITE (Solo para cores normales)
+        if (!this.asBlock().equals(com.tumod.protectormod.registry.ModBlocks.ADMIN_PROTECTOR.get())) {
+            int currentCores = data.getPlayerCoreCount(player.getUUID());
+            if (!player.hasPermissions(2) && currentCores >= data.serverMaxCores) {
+                cancelarColocacion(level, pos, player, stack, "§c[!] Límite alcanzado: §e" + data.serverMaxCores + " núcleos.");
+                return;
+            }
         }
 
         // 4. CONFIGURACIÓN DEL BLOQUE (ÉXITO)
         if (level.getBlockEntity(pos) instanceof com.tumod.protectormod.blockentity.ProtectionCoreBlockEntity core) {
-            core.setOwner(player.getUUID());
+            // --- CAMBIO CLAVE AQUÍ ---
+            // Pasamos UUID y el Nombre Real del jugador para evitar el "Lider "
+            core.setOwner(player.getUUID(), player.getName().getString());
 
-            // Generamos un nombre por defecto para el clan/zona
             String clanName = "Base_" + player.getName().getString() + "_" + pos.getX() + "_" + pos.getZ();
-
-            // Intentamos registrar el clan en los datos guardados del servidor
             data.tryCreateClan(clanName, player.getUUID(), player.getName().getString(), pos);
 
             core.markDirtyAndUpdate();
         }
 
+        // Colocamos la parte superior heredando las propiedades del estado actual
         level.setBlock(pos.above(), state.setValue(HALF, DoubleBlockHalf.UPPER), 3);
 
         super.setPlacedBy(level, pos, state, placer, stack);

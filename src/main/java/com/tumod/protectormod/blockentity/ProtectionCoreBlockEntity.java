@@ -5,6 +5,7 @@ import com.tumod.protectormod.menu.ProtectionCoreMenu;
 import com.tumod.protectormod.registry.*;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.HolderLookup;
+import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.network.chat.Component;
@@ -36,6 +37,7 @@ public class ProtectionCoreBlockEntity extends BlockEntity implements MenuProvid
     protected int adminRadius = 128;
     private UUID ownerUUID;
     private String clanName = "";
+    private String ownerName = "Protector";
 
     private final Map<String, Boolean> flags = new HashMap<>();
     private final Map<String, PlayerPermissions> permissionsMap = new HashMap<>();
@@ -68,13 +70,16 @@ public class ProtectionCoreBlockEntity extends BlockEntity implements MenuProvid
     @Override
     public void onLoad() {
         super.onLoad();
-        if (!this.level.isClientSide) {
-            // Verificación de seguridad: solo registrar si somos la base
-            if (this.getBlockState().hasProperty(ProtectionCoreBlock.HALF) &&
-                    this.getBlockState().getValue(ProtectionCoreBlock.HALF) == net.minecraft.world.level.block.state.properties.DoubleBlockHalf.LOWER) {
+        if (this.level != null && !this.level.isClientSide) {
+            // Forzamos que se registre si es la parte inferior
+            if (this.getBlockState().getValue(ProtectionCoreBlock.HALF) == net.minecraft.world.level.block.state.properties.DoubleBlockHalf.LOWER) {
 
-                LOADED_CORES.removeIf(core -> core.isRemoved() || core.getBlockPos().equals(this.worldPosition));
+                // Usamos una copia para evitar errores de modificación concurrente
+                LOADED_CORES.removeIf(c -> c.getBlockPos().equals(this.worldPosition));
                 LOADED_CORES.add(this);
+
+                // DEBUG: Descomenta esto para ver en consola si el Admin Core se registra
+                // if(isAdmin()) System.out.println("Admin Core registrado en: " + this.worldPosition);
             }
         }
     }
@@ -191,7 +196,20 @@ public class ProtectionCoreBlockEntity extends BlockEntity implements MenuProvid
         this.coreLevel++;
 
         if (this.level instanceof ServerLevel serverLevel) {
+            // 1. Sonido de Nivel (Mantenemos el tuyo y añadimos el de Tótem)
             serverLevel.playSound(null, this.worldPosition, SoundEvents.PLAYER_LEVELUP, SoundSource.BLOCKS, 1.0F, 1.0F);
+            serverLevel.playSound(null, this.worldPosition, SoundEvents.TOTEM_USE, SoundSource.BLOCKS, 0.8F, 1.2F);
+
+            // 2. Partículas de Tótem (Explosión esmeralda/dorada)
+            // Enviamos muchas partículas desde el centro del bloque
+            serverLevel.sendParticles(ParticleTypes.TOTEM_OF_UNDYING,
+                    this.worldPosition.getX() + 0.5,
+                    this.worldPosition.getY() + 1.0,
+                    this.worldPosition.getZ() + 0.5,
+                    30, // cantidad
+                    0.5, 0.5, 0.5, // dispersión
+                    0.15 // velocidad
+            );
         }
         this.markDirtyAndUpdate();
     }
@@ -261,26 +279,14 @@ public class ProtectionCoreBlockEntity extends BlockEntity implements MenuProvid
 
     public void initializeDefaultFlags() {
         this.flags.clear();
-
-        // Obtenemos todas las claves posibles
         for (String f : getAllFlagKeys()) {
-            /*
-             * Lógica de inicialización:
-             * TRUE = La acción está PERMITIDA (Menos protección)
-             * FALSE = La acción está BLOQUEADA (Más protección)
-             */
+            // FALSE = Bloqueado (Protegido)
+            // TRUE = Permitido (Libre)
 
-            if (f.equals("entry")) {
-                // Permitimos la entrada a la zona por defecto
-                flags.put(f, true);
-            }
-            else if (f.equals("fire-spread") || f.equals("fire-damage") || f.equals("explosions")) {
-                // Estas flags de ADMIN deben ser FALSE por defecto para asegurar protección total
-                flags.put(f, false);
-            }
-            else {
-                // El resto de flags (pvp, build, etc.) se inicializan protegidas (false)
-                flags.put(f, false);
+            if (f.equals("entry") || f.equals("hunger")) {
+                flags.put(f, true); // Permitir entrar y tener hambre por defecto
+            } else {
+                flags.put(f, false); // Todo lo demás bloqueado (PvP, Build, Explosiones)
             }
         }
     }
@@ -347,7 +353,16 @@ public class ProtectionCoreBlockEntity extends BlockEntity implements MenuProvid
         this.setFlag("fire-damage", enabled);
     }
 
-    public boolean getFlag(String flag) { return flags.getOrDefault(flag, false); }
+    public boolean getFlag(String flag) {
+        // Si la flag no existe en el mapa, devolvemos un valor seguro según la flag
+        if (!flags.containsKey(flag)) {
+            if (flag.equals("build") || flag.equals("break") || flag.equals("entry")) return true;
+            return false;
+        }
+        return flags.get(flag);
+    }
+
+
     public void setFlag(String flag, boolean value) { flags.put(flag, value); markDirtyAndUpdate(); }
 
     // --- PERSISTENCIA NBT ---
@@ -359,6 +374,7 @@ public class ProtectionCoreBlockEntity extends BlockEntity implements MenuProvid
         tag.putInt("AdminRadius", this.adminRadius);
         tag.putString("ClanName", this.clanName);
         if (ownerUUID != null) tag.putUUID("Owner", ownerUUID);
+        if (ownerName != null) tag.putString("OwnerName", ownerName);
 
         CompoundTag flagsTag = new CompoundTag();
         flags.forEach(flagsTag::putBoolean);
@@ -393,6 +409,7 @@ public class ProtectionCoreBlockEntity extends BlockEntity implements MenuProvid
         this.adminRadius = tag.getInt("AdminRadius");
         this.clanName = tag.getString("ClanName");
         if (tag.hasUUID("Owner")) this.ownerUUID = tag.getUUID("Owner");
+        if (tag.contains("OwnerName")) this.ownerName = tag.getString("OwnerName");
 
         this.flags.clear();
         if (tag.contains("CoreFlags")) {
@@ -441,13 +458,30 @@ public class ProtectionCoreBlockEntity extends BlockEntity implements MenuProvid
     }
 
     @Override
-    public ClientboundBlockEntityDataPacket getUpdatePacket() { return ClientboundBlockEntityDataPacket.create(this); }
+    public CompoundTag getUpdateTag(HolderLookup.Provider registries) {
+        CompoundTag tag = super.getUpdateTag(registries);
+        saveAdditional(tag, registries); // Empaqueta el ownerName y las flags
+        return tag;
+    }
 
     @Override
-    public CompoundTag getUpdateTag(HolderLookup.Provider registries) {
-        CompoundTag tag = new CompoundTag();
-        saveAdditional(tag, registries);
-        return tag;
+    public ClientboundBlockEntityDataPacket getUpdatePacket() {
+        // Crea el paquete de red para enviar al cliente
+        return ClientboundBlockEntityDataPacket.create(this);
+    }
+
+    @Override
+    public void onDataPacket(net.minecraft.network.Connection net, ClientboundBlockEntityDataPacket pkt, HolderLookup.Provider registries) {
+        CompoundTag tag = pkt.getTag();
+        if (tag != null) {
+            // Carga los datos recibidos en la instancia del cliente
+            loadAdditional(tag, registries);
+
+            // Si el bloque tiene niveles (Admin Core), forzamos un refresco visual
+            if (level != null && level.isClientSide) {
+                level.sendBlockUpdated(worldPosition, getBlockState(), getBlockState(), 3);
+            }
+        }
     }
 
     // --- GUI Y OTROS ---
@@ -474,16 +508,26 @@ public class ProtectionCoreBlockEntity extends BlockEntity implements MenuProvid
 
     // En ProtectionCoreBlockEntity.java
     public String getOwnerName() {
-        // Si el servidor está disponible, buscamos el nombre por UUID
-        if (this.level != null && !this.level.isClientSide) {
-            // Lógica de servidor...
+        // Si hay un clan, mostramos el clan, si no, el nombre del dueño guardado
+        if (this.clanName != null && !this.clanName.isEmpty()) {
+            return this.clanName;
         }
-        // En cliente, lo más fácil es que el dueño sea el que abrió la interfaz
-        // si no hay un sistema de sincronización de nombres de UUIDs.
-        return "Líder";
+        return this.ownerName;
     }
 
-    public void setOwner(UUID uuid) { this.ownerUUID = uuid; markDirtyAndUpdate(); }
+    public void setOwner(UUID uuid, String name) {
+        this.ownerUUID = uuid;
+        this.ownerName = name;
+        this.markDirtyAndUpdate();
+    }
+
+    // Mantén este por compatibilidad, pero usa el de arriba al colocar el bloque
+    public void setOwner(UUID uuid) {
+        this.ownerUUID = uuid;
+        this.markDirtyAndUpdate();
+    }
+
+
     public void setClanName(String name) { this.clanName = name; markDirtyAndUpdate(); }
     public String getClanName() { return this.clanName; }
     public int getCoreLevel() { return this.coreLevel; }

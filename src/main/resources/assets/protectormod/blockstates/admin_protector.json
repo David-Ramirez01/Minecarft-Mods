@@ -1,5 +1,10 @@
 {
   "variants": {
-    "": { "model": "protectormod:block/admin_protector" }
+    "half=lower": {
+      "model": "protectormod:block/admin_protector"
+    },
+    "half=upper": {
+      "model": "protectormod:block/empty"
+    }
   }
 }

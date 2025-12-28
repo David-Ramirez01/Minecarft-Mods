@@ -1,6 +1,9 @@
 {
-  "parent": "minecraft:block/cube_all",
+  "parent": "protectormod:block/protection_core",
   "textures": {
-    "all": "protectormod:block/admin_protector"
+    "0": "minecraft:block/gold_block",
+    "2": "minecraft:block/gold_block",
+    "5": "minecraft:block/gold_block",
+    "particle": "minecraft:block/gold_block"
   }
 }

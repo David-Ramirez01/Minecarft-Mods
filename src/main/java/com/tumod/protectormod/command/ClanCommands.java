@@ -26,6 +26,21 @@ public class ClanCommands {
     public static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
         // --- COMANDO /protector ---
         dispatcher.register(Commands.literal("protector")
+                .then(Commands.literal("presentation")
+                        .then(Commands.argument("state", StringArgumentType.word())
+                                .executes(context -> {
+                                    Player player = context.getSource().getPlayerOrException();
+                                    String state = StringArgumentType.getString(context, "state");
+                                    boolean isOn = state.equalsIgnoreCase("on");
+
+                                    player.getPersistentData().putBoolean("ProtectorPresentation", isOn);
+
+                                    context.getSource().sendSuccess(() -> Component.literal(
+                                            isOn ? "§aPresentación de zonas activada." : "§cPresentación de zonas desactivada."), true);
+                                    return 1;
+                                })
+                        )
+                )
                 .then(Commands.literal("help").executes(context -> {
                     CommandSourceStack source = context.getSource();
                     boolean isAdmin = source.hasPermission(2);
@@ -35,16 +50,19 @@ public class ClanCommands {
                     source.sendSuccess(() -> Component.literal(" "), false);
 
                     // --- COMANDOS PARA TODOS ---
-                    source.sendSuccess(() -> Component.literal("§b/protector accept §7- Aceptar invitación."), false);
+                    source.sendSuccess(() -> Component.literal("§b/protector help §7- Muestra este menú."), false);
+                    source.sendSuccess(() -> Component.literal("§b/protector presentation <on/off> §7- Mensajes de entrada."), false);
+                    source.sendSuccess(() -> Component.literal("§b/protector accept §7- Aceptar invitación a protección."), false);
                     source.sendSuccess(() -> Component.literal("§b/protector deny §7- Rechazar invitación."), false);
 
                     // --- COMANDOS SOLO PARA ADMINS ---
                     if (isAdmin) {
                         source.sendSuccess(() -> Component.literal(" "), false);
                         source.sendSuccess(() -> Component.literal("§d§lMODO ADMINISTRADOR:"), false);
-                        source.sendSuccess(() -> Component.literal("§b/protector visualizer §7- Ver todas las áreas."), false);
-                        source.sendSuccess(() -> Component.literal("§b/protector list §7- Listar núcleos activos."), false);
-                        source.sendSuccess(() -> Component.literal("§b/protector limit <n> §7- Cambiar límite global."), false);
+                        source.sendSuccess(() -> Component.literal("§b/protector debug §7- Info técnica del core bajo tus pies."), false);
+                        source.sendSuccess(() -> Component.literal("§b/protector visualizer §7- Activa/Desactiva bordes de partículas."), false);
+                        source.sendSuccess(() -> Component.literal("§b/protector list §7- Lista todos los núcleos del servidor."), false);
+                        source.sendSuccess(() -> Component.literal("§b/protector limit <n> §7- Cambia el límite de cores por jugador."), false);
                     }
 
                     source.sendSuccess(() -> Component.literal("§8§m================================="), false);
@@ -245,16 +263,16 @@ public class ClanCommands {
         source.sendSuccess(() -> Component.literal("§6§lSISTEMA DE CLANES - AYUDA"), false);
         source.sendSuccess(() -> Component.literal(" "), false);
 
-        // Comandos de usuario
-        source.sendSuccess(() -> Component.literal("§b/clan info §7- Ver información de tu clan."), false);
-        source.sendSuccess(() -> Component.literal("§b/clan delete §7- Disuelve tu clan (Si eres líder)."), false);
+        // Comandos de Usuario
+        source.sendSuccess(() -> Component.literal("§b/clan info §7- Ver info de tu clan y miembros."), false);
+        source.sendSuccess(() -> Component.literal("§b/clan delete §7- Disuelve tu clan (Si eres el líder)."), false);
 
         // Comandos de Admin
         if (isAdmin) {
             source.sendSuccess(() -> Component.literal(" "), false);
             source.sendSuccess(() -> Component.literal("§d§lCOMANDOS DE ADMIN:"), false);
             source.sendSuccess(() -> Component.literal("§b/clan info <nombre> §7- Ver info de cualquier clan."), false);
-            source.sendSuccess(() -> Component.literal("§b/clan admin delete <nombre> §7- Borrar un clan ajeno."), false);
+            source.sendSuccess(() -> Component.literal("§b/clan admin delete <nombre> §7- Borrar clan de otro jugador."), false);
         }
 
         source.sendSuccess(() -> Component.literal("§8§m================================="), false);
