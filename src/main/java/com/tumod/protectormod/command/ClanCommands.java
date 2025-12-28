@@ -9,13 +9,11 @@ import com.tumod.protectormod.util.ClanSavedData;
 import com.tumod.protectormod.util.InviteManager;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
-import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Player;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.HashSet;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -214,22 +212,51 @@ public class ClanCommands {
     // --- MÉTODOS DE AYUDA Y LISTA ---
     private static int showProtectorHelp(CommandSourceStack source) {
         boolean isAdmin = source.hasPermission(2);
+
         source.sendSuccess(() -> Component.literal("§8§m================================="), false);
         source.sendSuccess(() -> Component.literal("§6§lSISTEMA DE PROTECCIÓN - AYUDA"), false);
+        source.sendSuccess(() -> Component.literal(" "), false);
+
+        // Comandos para TODOS
         source.sendSuccess(() -> Component.literal("§b/protector help §7- Muestra este menú."), false);
-        source.sendSuccess(() -> Component.literal("§b/protector accept/deny §7- Invitaciones."), false);
+        source.sendSuccess(() -> Component.literal("§b/protector presentation <on/off> §7- Mensajes de entrada."), false);
+        source.sendSuccess(() -> Component.literal("§b/protector accept §7- Aceptar invitación."), false);
+        source.sendSuccess(() -> Component.literal("§b/protector deny §7- Rechazar invitación."), false);
+
+        // Comandos solo para ADMINS
         if (isAdmin) {
-            source.sendSuccess(() -> Component.literal("§d§lADMIN: §b/protector visualizer, debug, list, limit"), false);
+            source.sendSuccess(() -> Component.literal(" "), false);
+            source.sendSuccess(() -> Component.literal("§d§lMODO ADMINISTRADOR:"), false);
+            source.sendSuccess(() -> Component.literal("§b/protector debug §7- Info técnica del core."), false);
+            source.sendSuccess(() -> Component.literal("§b/protector visualizer §7- Bordes de partículas."), false);
+            source.sendSuccess(() -> Component.literal("§b/protector list §7- Lista todos los núcleos."), false);
+            source.sendSuccess(() -> Component.literal("§b/protector limit <n> §7- Límite global de cores."), false);
         }
+
         source.sendSuccess(() -> Component.literal("§8§m================================="), false);
         return 1;
     }
 
     private static int showClanHelp(CommandSourceStack source) {
+        boolean isAdmin = source.hasPermission(2);
+
         source.sendSuccess(() -> Component.literal("§8§m================================="), false);
         source.sendSuccess(() -> Component.literal("§6§lSISTEMA DE CLANES - AYUDA"), false);
-        source.sendSuccess(() -> Component.literal("§b/clan info §7- Ver info de tu clan."), false);
-        source.sendSuccess(() -> Component.literal("§b/clan delete §7- Disuelve tu clan."), false);
+        source.sendSuccess(() -> Component.literal(" "), false);
+
+        // Comandos para TODOS
+        source.sendSuccess(() -> Component.literal("§b/clan info §7- Ver info de tu clan y miembros."), false);
+        source.sendSuccess(() -> Component.literal("§b/clan delete §7- Disuelve tu clan (Solo líder)."), false);
+
+        // Comandos solo para ADMINS
+        if (isAdmin) {
+            source.sendSuccess(() -> Component.literal(" "), false);
+            source.sendSuccess(() -> Component.literal("§d§lMODO ADMINISTRADOR:"), false);
+            source.sendSuccess(() -> Component.literal("§b/clan info <nombre> §7- Ver info de cualquier clan."), false);
+            source.sendSuccess(() -> Component.literal("§b/clan limit <clan> <n> §7- Cambiar límite de miembros."), false);
+            source.sendSuccess(() -> Component.literal("§b/clan admin delete <nombre> §7- Borrar un clan ajeno."), false);
+        }
+
         source.sendSuccess(() -> Component.literal("§8§m================================="), false);
         return 1;
     }

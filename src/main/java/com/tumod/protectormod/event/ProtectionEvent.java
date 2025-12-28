@@ -156,17 +156,14 @@ public class ProtectionEvent {
         ServerPlayer player = event.getPlayer();
         ClanSavedData data = ClanSavedData.get(player.serverLevel());
 
-        // Obtenemos el objeto clan completo (líder o miembro)
+        // Buscamos el clan (ya sea líder o miembro)
         ClanSavedData.ClanInstance clan = data.getClanByMember(player.getUUID());
 
-        if (clan != null) {
-            String coords = String.format("%d, %d, %d",
-                    clan.corePos.getX(), clan.corePos.getY(), clan.corePos.getZ());
+        if (clan != null && !clan.name.isEmpty()) {
+            // Formato limpio: [NombreClan] Jugador: Mensaje
+            Component clanPrefix = Component.literal("§8[§6" + clan.name + "§8] ");
 
-            // Formato: [Clan] (X, Y, Z) Nombre: Mensaje
-            Component clanPrefix = Component.literal("§8[§6" + clan.name + "§8] §7(" + coords + ") ");
-
-            // Reemplazamos el mensaje decorado
+            // Aplicamos el prefijo al mensaje
             event.setMessage(Component.empty()
                     .append(clanPrefix)
                     .append(player.getDisplayName())
@@ -179,11 +176,11 @@ public class ProtectionEvent {
     public static void onNameFormat(PlayerEvent.NameFormat event) {
         if (event.getEntity() instanceof ServerPlayer player) {
             ClanSavedData data = ClanSavedData.get(player.serverLevel());
-            String clanName = data.getClanOfPlayer(player.getUUID());
+            ClanSavedData.ClanInstance clan = data.getClanByMember(player.getUUID());
 
-            if (clanName != null && !clanName.isEmpty()) {
-                // Esto hace que el nombre del clan aparezca en el TAB y sobre la cabeza
-                Component displayName = Component.literal("§8[§6" + clanName + "§8] ")
+            if (clan != null) {
+                // Solo añadimos el nombre del clan como prefijo visual
+                Component displayName = Component.literal("§8[§6" + clan.name + "§8] ")
                         .append(event.getDisplayname());
                 event.setDisplayname(displayName);
             }
