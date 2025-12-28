@@ -2,10 +2,12 @@ package com.tumod.protectormod.event;
 
 import com.tumod.protectormod.ProtectorMod;
 import com.tumod.protectormod.blockentity.ProtectionCoreBlockEntity;
+import com.tumod.protectormod.util.ClanSavedData;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.damagesource.DamageTypes;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
@@ -16,7 +18,9 @@ import net.minecraft.world.phys.Vec3;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
 import com.tumod.protectormod.command.ClanCommands;
+import net.neoforged.neoforge.event.ServerChatEvent;
 import net.neoforged.neoforge.event.entity.living.LivingIncomingDamageEvent;
+import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
 import net.neoforged.neoforge.event.level.BlockEvent;
 import net.neoforged.neoforge.event.level.ExplosionEvent;
@@ -143,6 +147,45 @@ public class ProtectionEvent {
                 if (!core.getFlag("entry") && !canBypass(player, core)) {
                     ejectPlayer(player, core);
                 }
+            }
+        }
+    }
+
+    @SubscribeEvent
+    public static void onServerChat(ServerChatEvent event) {
+        ServerPlayer player = event.getPlayer();
+        ClanSavedData data = ClanSavedData.get(player.serverLevel());
+
+        // Obtenemos el objeto clan completo (líder o miembro)
+        ClanSavedData.ClanInstance clan = data.getClanByMember(player.getUUID());
+
+        if (clan != null) {
+            String coords = String.format("%d, %d, %d",
+                    clan.corePos.getX(), clan.corePos.getY(), clan.corePos.getZ());
+
+            // Formato: [Clan] (X, Y, Z) Nombre: Mensaje
+            Component clanPrefix = Component.literal("§8[§6" + clan.name + "§8] §7(" + coords + ") ");
+
+            // Reemplazamos el mensaje decorado
+            event.setMessage(Component.empty()
+                    .append(clanPrefix)
+                    .append(player.getDisplayName())
+                    .append(": ")
+                    .append(event.getMessage()));
+        }
+    }
+
+    @SubscribeEvent
+    public static void onNameFormat(PlayerEvent.NameFormat event) {
+        if (event.getEntity() instanceof ServerPlayer player) {
+            ClanSavedData data = ClanSavedData.get(player.serverLevel());
+            String clanName = data.getClanOfPlayer(player.getUUID());
+
+            if (clanName != null && !clanName.isEmpty()) {
+                // Esto hace que el nombre del clan aparezca en el TAB y sobre la cabeza
+                Component displayName = Component.literal("§8[§6" + clanName + "§8] ")
+                        .append(event.getDisplayname());
+                event.setDisplayname(displayName);
             }
         }
     }

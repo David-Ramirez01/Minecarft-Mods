@@ -18,10 +18,12 @@ import org.jetbrains.annotations.Nullable;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class ClanCommands {
     public static int maxCoresPerPlayer = 3;
-    public static final Set<UUID> VISUALIZER_ENABLED = new HashSet<>();
+    // Usamos ConcurrentHashMap para evitar errores de acceso simultáneo
+    public static final Set<UUID> VISUALIZER_ENABLED = ConcurrentHashMap.newKeySet();
 
     public static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
         // --- COMANDO /protector ---
@@ -32,42 +34,14 @@ public class ClanCommands {
                                     Player player = context.getSource().getPlayerOrException();
                                     String state = StringArgumentType.getString(context, "state");
                                     boolean isOn = state.equalsIgnoreCase("on");
-
                                     player.getPersistentData().putBoolean("ProtectorPresentation", isOn);
-
                                     context.getSource().sendSuccess(() -> Component.literal(
                                             isOn ? "§aPresentación de zonas activada." : "§cPresentación de zonas desactivada."), true);
                                     return 1;
                                 })
                         )
                 )
-                .then(Commands.literal("help").executes(context -> {
-                    CommandSourceStack source = context.getSource();
-                    boolean isAdmin = source.hasPermission(2);
-
-                    source.sendSuccess(() -> Component.literal("§8§m================================="), false);
-                    source.sendSuccess(() -> Component.literal("§6§lSISTEMA DE PROTECCIÓN - AYUDA"), false);
-                    source.sendSuccess(() -> Component.literal(" "), false);
-
-                    // --- COMANDOS PARA TODOS ---
-                    source.sendSuccess(() -> Component.literal("§b/protector help §7- Muestra este menú."), false);
-                    source.sendSuccess(() -> Component.literal("§b/protector presentation <on/off> §7- Mensajes de entrada."), false);
-                    source.sendSuccess(() -> Component.literal("§b/protector accept §7- Aceptar invitación a protección."), false);
-                    source.sendSuccess(() -> Component.literal("§b/protector deny §7- Rechazar invitación."), false);
-
-                    // --- COMANDOS SOLO PARA ADMINS ---
-                    if (isAdmin) {
-                        source.sendSuccess(() -> Component.literal(" "), false);
-                        source.sendSuccess(() -> Component.literal("§d§lMODO ADMINISTRADOR:"), false);
-                        source.sendSuccess(() -> Component.literal("§b/protector debug §7- Info técnica del core bajo tus pies."), false);
-                        source.sendSuccess(() -> Component.literal("§b/protector visualizer §7- Activa/Desactiva bordes de partículas."), false);
-                        source.sendSuccess(() -> Component.literal("§b/protector list §7- Lista todos los núcleos del servidor."), false);
-                        source.sendSuccess(() -> Component.literal("§b/protector limit <n> §7- Cambia el límite de cores por jugador."), false);
-                    }
-
-                    source.sendSuccess(() -> Component.literal("§8§m================================="), false);
-                    return 1;
-                }))
+                .then(Commands.literal("help").executes(context -> showProtectorHelp(context.getSource())))
                 .then(Commands.literal("visualizer")
                         .requires(s -> s.hasPermission(2))
                         .executes(context -> {
@@ -90,79 +64,43 @@ public class ClanCommands {
                                     ClanSavedData data = ClanSavedData.get(c.getSource().getLevel());
                                     data.serverMaxCores = nuevaCant;
                                     data.setDirty();
-                                    c.getSource().sendSuccess(() -> Component.literal("§aLímite global actualizado a: §f" + nuevaCant), true);
+                                    c.getSource().sendSuccess(() -> Component.literal("§aLímite global de cores actualizado a: §f" + nuevaCant), true);
                                     return 1;
                                 }))
                 )
                 .then(Commands.literal("list")
                         .requires(s -> s.hasPermission(2))
-                        .executes(context -> {
-                            ProtectionCoreBlockEntity.getLoadedCores().removeIf(core ->
-                                    core.isRemoved() || core.getLevel() == null);
-
-                            var cores = ProtectionCoreBlockEntity.getLoadedCores();
-                            if (cores.isEmpty()) {
-                                context.getSource().sendSuccess(() -> Component.literal("§cNo hay núcleos activos."), false);
-                                return 0;
-                            }
-
-                            context.getSource().sendSuccess(() -> Component.literal("§6§lAUDITORÍA DE NÚCLEOS:"), false);
-
-                            for (ProtectionCoreBlockEntity core : cores) {
-                                // Definimos variables como 'final' para que la lambda las acepte
-                                final BlockPos p = core.getBlockPos();
-                                final String clan = core.getClanName().isEmpty() ? "Sin Clan" : core.getClanName();
-                                final UUID ownerId = core.getOwnerUUID();
-
-                                // Obtenemos el nombre del dueño fuera de la lambda
-                                String tempName = "Desconocido";
-                                var profile = context.getSource().getServer().getProfileCache().get(ownerId);
-                                if (profile.isPresent()) {
-                                    tempName = profile.get().getName();
-                                }
-                                final String ownerName = tempName;
-
-                                // Ahora enviamos el mensaje usando las variables 'final'
-                                context.getSource().sendSuccess(() -> Component.literal(
-                                        "§e- §fPos: §b" + p.getX() + " " + p.getY() + " " + p.getZ() +
-                                                " §8| §e" + clan +
-                                                " §8| §7Dueño: §f" + ownerName), false);
-                            }
-                            return cores.size();
-                        })
-                )
-                .then(Commands.literal("accept")
-                        .executes(context -> executeAccept(context.getSource())))
-                .then(Commands.literal("deny")
-                        .executes(context -> executeDeny(context.getSource())))
+                        .executes(context -> executeList(context.getSource())))
+                .then(Commands.literal("accept").executes(context -> executeAccept(context.getSource())))
+                .then(Commands.literal("deny").executes(context -> executeDeny(context.getSource())))
         );
 
         // --- COMANDO /clan ---
         dispatcher.register(Commands.literal("clan")
-                // Ayuda dinámica si solo escriben /clan
                 .executes(context -> showClanHelp(context.getSource()))
-
-                // Subcomando help explícito
                 .then(Commands.literal("help").executes(context -> showClanHelp(context.getSource())))
-
-                .then(Commands.literal("delete").executes(context -> {
-                    ServerPlayer player = context.getSource().getPlayerOrException();
-                    ClanSavedData data = ClanSavedData.get(player.serverLevel());
-                    String clanName = data.getClanOfPlayer(player.getUUID());
-
-                    if (clanName.isEmpty()) {
-                        context.getSource().sendFailure(Component.literal("§cNo eres líder de ningún clan."));
-                        return 0;
-                    }
-
-                    ProtectionCoreBlockEntity.getLoadedCores().stream()
-                            .filter(core -> player.getUUID().equals(core.getOwnerUUID()))
-                            .forEach(ProtectionCoreBlockEntity::resetToDefault);
-
-                    data.deleteClan(player.getUUID());
-                    context.getSource().sendSuccess(() -> Component.literal("§eClan disuelto."), true);
-                    return 1;
-                }))
+                .then(Commands.literal("limit")
+                        .requires(s -> s.hasPermission(2))
+                        .then(Commands.argument("nombreClan", StringArgumentType.string())
+                                .then(Commands.argument("nuevoLimite", IntegerArgumentType.integer(1, 100))
+                                        .executes(context -> {
+                                            String clanName = StringArgumentType.getString(context, "nombreClan");
+                                            int limite = IntegerArgumentType.getInteger(context, "nuevoLimite");
+                                            ClanSavedData data = ClanSavedData.get(context.getSource().getLevel());
+                                            ClanSavedData.ClanInstance clan = data.getClan(clanName);
+                                            if (clan == null) {
+                                                context.getSource().sendFailure(Component.literal("§cEl clan '" + clanName + "' no existe."));
+                                                return 0;
+                                            }
+                                            clan.maxMembers = limite;
+                                            data.setDirty();
+                                            context.getSource().sendSuccess(() -> Component.literal("§aLímite del clan §b" + clanName + " §aactualizado a §f" + limite), true);
+                                            return 1;
+                                        })
+                                )
+                        )
+                )
+                .then(Commands.literal("delete").executes(context -> executeDelete(context.getSource())))
                 .then(Commands.literal("info")
                         .executes(context -> showClanInfo(context.getSource(), null))
                         .then(Commands.argument("nombreClan", StringArgumentType.greedyString())
@@ -180,11 +118,6 @@ public class ClanCommands {
                                                 context.getSource().sendFailure(Component.literal("§cEl clan '" + target + "' no existe."));
                                                 return 0;
                                             }
-
-                                            ProtectionCoreBlockEntity.getLoadedCores().stream()
-                                                    .filter(c -> clan.leaderUUID.equals(c.getOwnerUUID()))
-                                                    .forEach(ProtectionCoreBlockEntity::resetToDefault);
-
                                             data.deleteClan(clan.leaderUUID);
                                             context.getSource().sendSuccess(() -> Component.literal("§6[Admin] §eEl clan §b" + target + " §eha sido borrado."), true);
                                             return 1;
@@ -192,90 +125,135 @@ public class ClanCommands {
         );
     }
 
-    private static int showClanInfo(CommandSourceStack source, @Nullable String targetClan) {
+    private static int showClanInfo(CommandSourceStack source, @Nullable String targetClanName) {
         ClanSavedData data = ClanSavedData.get(source.getLevel());
         ClanSavedData.ClanInstance clan;
-        if (targetClan == null) {
+
+        if (targetClanName == null) {
             if (source.getEntity() instanceof Player player) {
-                clan = data.getClan(data.getClanOfPlayer(player.getUUID()));
+                clan = data.getClanByMember(player.getUUID()); // Busca por líder o miembro
+                if (clan == null) {
+                    source.sendFailure(Component.literal("§cNo tienes clan."));
+                    return 0;
+                }
             } else return 0;
         } else {
-            clan = data.getClan(targetClan);
+            clan = data.getClan(targetClanName);
         }
 
-        if (clan == null) return 0;
+        if (clan == null) {
+            source.sendFailure(Component.literal("§cClan no encontrado."));
+            return 0;
+        }
 
-        source.sendSuccess(() -> Component.literal("§6§lInfo: §b" + clan.name), false);
+        source.sendSuccess(() -> Component.literal("§8§m================================="), false);
+        source.sendSuccess(() -> Component.literal("§6§lINFO: §b" + clan.name), false);
         source.sendSuccess(() -> Component.literal("§eLíder: §f" + clan.leaderName), false);
+        source.sendSuccess(() -> Component.literal("§eMiembros: §a" + clan.members.size() + "/" + clan.maxMembers), false);
+        source.sendSuccess(() -> Component.literal("§eUbicación Core: §7(" + clan.corePos.getX() + ", " + clan.corePos.getY() + ", " + clan.corePos.getZ() + ")"), false);
+        source.sendSuccess(() -> Component.literal("§8§m================================="), false);
         return 1;
     }
 
-    // Lógica que deberías poner en tu gestor de comandos
+    private static int executeDelete(CommandSourceStack source) throws CommandSyntaxException {
+        ServerPlayer player = source.getPlayerOrException();
+        ClanSavedData data = ClanSavedData.get(player.serverLevel());
+
+        // Verificamos si es líder
+        ClanSavedData.ClanInstance clan = data.getClanByLeader(player.getUUID());
+
+        if (clan == null) {
+            // Si es miembro pero no líder
+            if (data.getClanByMember(player.getUUID()) != null) {
+                source.sendFailure(Component.literal("§cSolo el líder puede disolver el clan."));
+            } else {
+                source.sendFailure(Component.literal("§cAun no tienes un clan que disolver."));
+            }
+            return 0;
+        }
+
+        data.deleteClan(player.getUUID());
+        source.sendSuccess(() -> Component.literal("§eClan §b" + clan.name + " §edisuelto correctamente."), true);
+        return 1;
+    }
+
     public static int executeAccept(CommandSourceStack source) throws CommandSyntaxException {
         ServerPlayer player = source.getPlayerOrException();
         InviteManager.PendingInvite invite = InviteManager.getInvite(player.getUUID());
 
         if (invite != null) {
-            if (player.level().getBlockEntity(invite.corePos()) instanceof ProtectionCoreBlockEntity core) {
-                // AHORA SÍ: Lo añadimos oficialmente con permiso básico (interactuar)
-                core.updatePermission(player.getName().getString(), "interact", true);
-                core.markDirtyAndUpdate();
+            ClanSavedData data = ClanSavedData.get(player.serverLevel());
+            ClanSavedData.ClanInstance clan = data.getClanByLeader(invite.requesterUUID());
 
-                player.sendSystemMessage(Component.literal("§a✔ Has aceptado la invitación."));
-
-                // Avisar al dueño si sigue conectado
-                ServerPlayer owner = player.server.getPlayerList().getPlayer(invite.requesterUUID());
-                if (owner != null) {
-                    owner.sendSystemMessage(Component.literal("§b" + player.getName().getString() + " §ahas aceptado tu invitación."));
+            if (clan != null) {
+                // VALIDACIÓN DE LÍMITE
+                if (clan.members.size() >= clan.maxMembers) {
+                    player.sendSystemMessage(Component.literal("§c[!] El clan está lleno. Límite: " + clan.maxMembers));
+                    return 0;
                 }
 
+                // UNIÓN OFICIAL AL CLAN
+                clan.members.add(player.getUUID());
+                data.setDirty();
+
+                // PERMISOS EN EL CORE
+                if (player.level().getBlockEntity(invite.corePos()) instanceof ProtectionCoreBlockEntity core) {
+                    core.updatePermission(player.getName().getString(), "build", true);
+                    core.markDirtyAndUpdate();
+                }
+
+                player.sendSystemMessage(Component.literal("§a✔ Te has unido al clan: §b" + clan.name));
                 InviteManager.removeInvite(player.getUUID());
+                return 1;
             }
-        } else {
-            player.sendSystemMessage(Component.literal("§c[!] No tienes invitaciones pendientes o ya expiraron."));
         }
-        return 1;
+        player.sendSystemMessage(Component.literal("§c[!] No tienes invitaciones pendientes."));
+        return 0;
     }
 
-    public static int executeDeny(CommandSourceStack source) throws CommandSyntaxException {
-        ServerPlayer player = source.getPlayerOrException();
-        InviteManager.PendingInvite invite = InviteManager.getInvite(player.getUUID());
-
-        if (invite != null) {
-            InviteManager.removeInvite(player.getUUID());
-            player.sendSystemMessage(Component.literal("§eHas rechazado la invitación."));
-
-            // Opcional: Avisar al dueño que su invitación fue rechazada
-            ServerPlayer owner = player.server.getPlayerList().getPlayer(invite.requesterUUID());
-            if (owner != null) {
-                owner.sendSystemMessage(Component.literal("§c" + player.getName().getString() + " §7ha rechazado tu invitación."));
-            }
-        } else {
-            player.sendSystemMessage(Component.literal("§c[!] No hay ninguna invitación activa para rechazar."));
+    // --- MÉTODOS DE AYUDA Y LISTA ---
+    private static int showProtectorHelp(CommandSourceStack source) {
+        boolean isAdmin = source.hasPermission(2);
+        source.sendSuccess(() -> Component.literal("§8§m================================="), false);
+        source.sendSuccess(() -> Component.literal("§6§lSISTEMA DE PROTECCIÓN - AYUDA"), false);
+        source.sendSuccess(() -> Component.literal("§b/protector help §7- Muestra este menú."), false);
+        source.sendSuccess(() -> Component.literal("§b/protector accept/deny §7- Invitaciones."), false);
+        if (isAdmin) {
+            source.sendSuccess(() -> Component.literal("§d§lADMIN: §b/protector visualizer, debug, list, limit"), false);
         }
+        source.sendSuccess(() -> Component.literal("§8§m================================="), false);
         return 1;
     }
 
     private static int showClanHelp(CommandSourceStack source) {
-        boolean isAdmin = source.hasPermission(2);
-
         source.sendSuccess(() -> Component.literal("§8§m================================="), false);
         source.sendSuccess(() -> Component.literal("§6§lSISTEMA DE CLANES - AYUDA"), false);
-        source.sendSuccess(() -> Component.literal(" "), false);
-
-        // Comandos de Usuario
-        source.sendSuccess(() -> Component.literal("§b/clan info §7- Ver info de tu clan y miembros."), false);
-        source.sendSuccess(() -> Component.literal("§b/clan delete §7- Disuelve tu clan (Si eres el líder)."), false);
-
-        // Comandos de Admin
-        if (isAdmin) {
-            source.sendSuccess(() -> Component.literal(" "), false);
-            source.sendSuccess(() -> Component.literal("§d§lCOMANDOS DE ADMIN:"), false);
-            source.sendSuccess(() -> Component.literal("§b/clan info <nombre> §7- Ver info de cualquier clan."), false);
-            source.sendSuccess(() -> Component.literal("§b/clan admin delete <nombre> §7- Borrar clan de otro jugador."), false);
-        }
-
+        source.sendSuccess(() -> Component.literal("§b/clan info §7- Ver info de tu clan."), false);
+        source.sendSuccess(() -> Component.literal("§b/clan delete §7- Disuelve tu clan."), false);
         source.sendSuccess(() -> Component.literal("§8§m================================="), false);
         return 1;
+    }
+
+    private static int executeList(CommandSourceStack source) {
+        var cores = ProtectionCoreBlockEntity.getLoadedCores();
+        if (cores.isEmpty()) {
+            source.sendSuccess(() -> Component.literal("§cNo hay núcleos activos."), false);
+            return 0;
+        }
+        source.sendSuccess(() -> Component.literal("§6§lAUDITORÍA DE NÚCLEOS:"), false);
+        for (ProtectionCoreBlockEntity core : cores) {
+            source.sendSuccess(() -> Component.literal("§e- §fPos: §b" + core.getBlockPos().toShortString() + " §8| §e" + core.getClanName()), false);
+        }
+        return cores.size();
+    }
+
+    public static int executeDeny(CommandSourceStack source) throws CommandSyntaxException {
+        ServerPlayer player = source.getPlayerOrException();
+        if (InviteManager.getInvite(player.getUUID()) != null) {
+            InviteManager.removeInvite(player.getUUID());
+            player.sendSystemMessage(Component.literal("§eInvitación rechazada."));
+            return 1;
+        }
+        return 0;
     }
 }
