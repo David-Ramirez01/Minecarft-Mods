@@ -3,6 +3,7 @@ package com.tumod.protectormod.blockentity;
 import com.tumod.protectormod.block.ProtectionCoreBlock;
 import com.tumod.protectormod.menu.ProtectionCoreMenu;
 import com.tumod.protectormod.registry.*;
+import com.tumod.protectormod.util.ClanSavedData;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.core.particles.ParticleTypes;
@@ -11,15 +12,18 @@ import net.minecraft.nbt.ListTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.MenuProvider;
 import net.minecraft.world.SimpleContainer;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
@@ -49,6 +53,8 @@ public class ProtectionCoreBlockEntity extends BlockEntity implements MenuProvid
             ProtectionCoreBlockEntity.this.markDirtyAndUpdate();
         }
     };
+
+
 
     // --- CONSTRUCTORES ---
 
@@ -83,6 +89,8 @@ public class ProtectionCoreBlockEntity extends BlockEntity implements MenuProvid
             }
         }
     }
+
+
 
     @Override
     public void onChunkUnloaded() {
@@ -186,32 +194,113 @@ public class ProtectionCoreBlockEntity extends BlockEntity implements MenuProvid
 
     // --- MEJORAS Y RADIOS ---
 
-    public void upgrade() {
-        if (this.coreLevel >= 5 || !canUpgrade()) return;
+    public void upgrade(ServerPlayer player) {
+        // 1. Determinar el radio del siguiente nivel
+        int siguienteNivel = this.coreLevel + 1;
+        if (siguienteNivel > 5) return;
 
+        int radioFuturo = obtenerRadioPorNivel(siguienteNivel);
+
+        // 2. VALIDACIÓN DE SUPERPOSICIÓN
+        if (!esAdminCore()) {
+            if (!puedeExpandirseA(radioFuturo)) {
+                player.displayClientMessage(Component.literal("§c[!] No hay espacio suficiente. El radio choca con otra zona."), true);
+                player.playSound(SoundEvents.VILLAGER_NO, 1.0F, 1.0F);
+                return;
+            }
+        }
+
+        // 3. Validaciones de materiales
+        if (!canUpgrade()) {
+            player.displayClientMessage(Component.literal("§c[!] No tienes los materiales necesarios."), true);
+            return;
+        }
+
+        // 4. Procesar Mejora
         int materialCount = (this.coreLevel == 1) ? 64 : 32;
         this.inventory.removeItem(0, 1);
         this.inventory.removeItem(1, materialCount);
 
+        // --- CAMBIO DE NIVEL Y ACTUALIZACIÓN DE BLOQUE ---
+        // --- CAMBIO DE NIVEL Y ACTUALIZACIÓN DE BLOQUE ---
         this.coreLevel++;
 
+        if (this.level != null) {
+            // ACTUALIZAR PARTE INFERIOR (Donde está esta BlockEntity)
+            BlockState currentState = this.level.getBlockState(this.worldPosition);
+            if (currentState.hasProperty(ProtectionCoreBlock.LEVEL)) {
+                BlockState newState = currentState.setValue(ProtectionCoreBlock.LEVEL, this.coreLevel);
+                this.level.setBlock(this.worldPosition, newState, 3);
+                this.level.sendBlockUpdated(this.worldPosition, currentState, newState, 3);
+            }
+
+            // ACTUALIZAR PARTE SUPERIOR (El bloque de arriba)
+            BlockPos upperPos = this.worldPosition.above();
+            BlockState upperState = this.level.getBlockState(upperPos);
+
+            // Verificamos que sea el mismo tipo de bloque antes de actualizarlo
+            if (upperState.is(currentState.getBlock()) && upperState.hasProperty(ProtectionCoreBlock.LEVEL)) {
+                BlockState newUpperState = upperState.setValue(ProtectionCoreBlock.LEVEL, this.coreLevel);
+                this.level.setBlock(upperPos, newUpperState, 3);
+                this.level.sendBlockUpdated(upperPos, upperState, newUpperState, 3);
+            }
+        }
+
+        // Dentro de upgrade() en la BlockEntity:
+        this.setChanged(); // Guarda en disco
+        if (this.level != null) {
+            this.level.sendBlockUpdated(this.worldPosition, getBlockState(), getBlockState(), 3); // Avisa al render
+        }
+
+        // 5. Efectos visuales y sonido
         if (this.level instanceof ServerLevel serverLevel) {
-            // 1. Sonido de Nivel (Mantenemos el tuyo y añadimos el de Tótem)
             serverLevel.playSound(null, this.worldPosition, SoundEvents.PLAYER_LEVELUP, SoundSource.BLOCKS, 1.0F, 1.0F);
             serverLevel.playSound(null, this.worldPosition, SoundEvents.TOTEM_USE, SoundSource.BLOCKS, 0.8F, 1.2F);
 
-            // 2. Partículas de Tótem (Explosión esmeralda/dorada)
-            // Enviamos muchas partículas desde el centro del bloque
             serverLevel.sendParticles(ParticleTypes.TOTEM_OF_UNDYING,
                     this.worldPosition.getX() + 0.5,
                     this.worldPosition.getY() + 1.0,
                     this.worldPosition.getZ() + 0.5,
-                    30, // cantidad
-                    0.5, 0.5, 0.5, // dispersión
-                    0.15 // velocidad
+                    30, 0.5, 0.5, 0.5, 0.15
             );
         }
+
+        player.displayClientMessage(Component.literal("§a[!] ¡Núcleo mejorado al nivel " + this.coreLevel + "!"), true);
         this.markDirtyAndUpdate();
+    }
+
+    // Verifica si este núcleo es el de Admin
+    private boolean esAdminCore() {
+        return this.getBlockState().is(com.tumod.protectormod.registry.ModBlocks.ADMIN_PROTECTOR.get());
+    }
+
+    // Lógica matemática: ¿Choca mi radio futuro con el radio actual de otros?
+    public boolean puedeExpandirseA(int radioFuturo) {
+        for (var otherCore : getLoadedCores()) {
+            if (otherCore == this) continue;
+
+            // Calculamos la distancia entre centros
+            double distancia = Math.sqrt(this.worldPosition.distSqr(otherCore.getBlockPos()));
+            int radioOtro = otherCore.getRange();
+
+            // Si la distancia es menor a la suma de los radios, se están solapando
+            if (distancia < (radioFuturo + radioOtro)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    // Define cuánto crece el radio según el nivel (Ajusta los números a tu gusto)
+    private int obtenerRadioPorNivel(int nivel) {
+        return switch (nivel) {
+            case 1 -> 16;
+            case 2 -> 32;
+            case 3 -> 48;
+            case 4 -> 64;
+            case 5 -> 80;
+            default -> 16;
+        };
     }
 
     public static final List<String> BASIC_FLAGS = List.of(
@@ -261,10 +350,11 @@ public class ProtectionCoreBlockEntity extends BlockEntity implements MenuProvid
 
     public int getRadius() {
         if (isAdmin()) return this.adminRadius;
-        return switch (this.coreLevel) {
-            case 2 -> 16; case 3 -> 32; case 4 -> 48; case 5 -> 64;
-            default -> 8;
-        };
+        return obtenerRadioPorNivel(this.coreLevel);
+    }
+
+    public int getRange() {
+        return getRadius();
     }
 
     public int getAdminRadius() {

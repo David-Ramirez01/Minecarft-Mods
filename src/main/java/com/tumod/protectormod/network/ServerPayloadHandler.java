@@ -23,14 +23,21 @@ public class ServerPayloadHandler {
     public static void handleUpgrade(final UpgradeCorePayload payload, final IPayloadContext context) {
         context.enqueueWork(() -> {
             var player = context.player();
+            if (!(player instanceof ServerPlayer serverPlayer)) return;
 
             if (player.containerMenu instanceof ProtectionCoreMenu menu) {
                 ProtectionCoreBlockEntity core = menu.getCore();
 
-                // SEGURIDAD: Solo el dueño del núcleo puede realizar mejoras
-                if (core != null && !core.isRemoved() && player.getUUID().equals(core.getOwnerUUID())) {
-                    if (core.canUpgrade()) {
-                        core.upgrade();
+                if (core != null && !core.isRemoved()) {
+                    // SEGURIDAD: Solo el dueño o un OP pueden mejorar el núcleo
+                    boolean isOwner = player.getUUID().equals(core.getOwnerUUID());
+                    boolean isOP = player.hasPermissions(2);
+
+                    if (isOwner || isOP) {
+                        // Pasamos el serverPlayer para que el core pueda enviar mensajes de error
+                        core.upgrade(serverPlayer);
+                    } else {
+                        serverPlayer.displayClientMessage(Component.literal("§c[!] No eres el dueño de este núcleo."), true);
                     }
                 }
             }
@@ -112,41 +119,48 @@ public class ServerPayloadHandler {
 
     public static void handleCreateClan(CreateClanPayload payload, IPayloadContext context) {
         context.enqueueWork(() -> {
-            // Casteamos el player a ServerPlayer para tener acceso a métodos de servidor
-            if (!(context.player() instanceof net.minecraft.server.level.ServerPlayer owner)) return;
+            if (!(context.player() instanceof ServerPlayer owner)) return;
 
-            // Obtenemos el ServerLevel directamente
             ServerLevel serverLevel = owner.serverLevel();
+            String name = payload.clanName().trim(); // Limpiamos espacios
 
-            // Buscamos el BlockEntity usando el level obtenido
             if (serverLevel.getBlockEntity(payload.pos()) instanceof ProtectionCoreBlockEntity core) {
-
-                // Accedemos a ClanSavedData (Asegúrate de que la clase ClanSavedData exista en .util)
                 ClanSavedData data = ClanSavedData.get(serverLevel);
 
-                // Intentar crear el clan en la base de datos
-                boolean creado = data.tryCreateClan(
-                        payload.clanName(),
-                        owner.getUUID(),
-                        owner.getName().getString(),
-                        payload.pos()
-                );
-
-                if (!creado) {
-                    owner.displayClientMessage(net.minecraft.network.chat.Component.literal("§c[!] Ya eres líder o el nombre ya existe."), true);
+                // 1. Validar si el nombre es demasiado corto o largo
+                if (name.length() < 3 || name.length() > 16) {
+                    owner.displayClientMessage(Component.literal("§c[!] El nombre debe tener entre 3 y 16 caracteres."), true);
                     return;
                 }
 
-                // Guardar en el bloque físico
-                core.setClanName(payload.clanName());
-                core.setOwner(owner.getUUID());
+                // 2. Validar si el jugador ya es líder (Usando el método que añadimos a ClanSavedData)
+                if (data.getClanByLeader(owner.getUUID()) != null) {
+                    owner.displayClientMessage(Component.literal("§c[!] Ya eres líder de un clan. Disuélvelo primero."), true);
+                    return;
+                }
 
-                // Notificación Global: Usamos serverLevel.getServer()
-                net.minecraft.network.chat.Component chatMsg = net.minecraft.network.chat.Component.literal("§6[Clan] " + owner.getName().getString() + " ha fundado: §b" + payload.clanName());
-                serverLevel.getServer().getPlayerList().broadcastSystemMessage(chatMsg, false);
+                // 3. Validar si el nombre ya existe
+                if (data.getClan(name) != null) {
+                    owner.displayClientMessage(Component.literal("§c[!] El nombre '" + name + "' ya está en uso."), true);
+                    return;
+                }
 
-                // Sincronización
-                core.markDirtyAndUpdate();
+                // 4. Intentar creación definitiva
+                boolean creado = data.tryCreateClan(name, owner.getUUID(), owner.getName().getString(), payload.pos());
+
+                if (creado) {
+                    core.setClanName(name);
+                    core.setOwner(owner.getUUID());
+
+                    // Notificación Global
+                    Component chatMsg = Component.literal("§6§l[Clan] §f" + owner.getName().getString() + " ha fundado: §b" + name);
+                    serverLevel.getServer().getPlayerList().broadcastSystemMessage(chatMsg, false);
+
+                    // Efecto de sonido de éxito para el fundador
+                    owner.playNotifySound(net.minecraft.sounds.SoundEvents.PLAYER_LEVELUP, net.minecraft.sounds.SoundSource.PLAYERS, 1.0f, 1.0f);
+
+                    core.markDirtyAndUpdate();
+                }
             }
         });
     }

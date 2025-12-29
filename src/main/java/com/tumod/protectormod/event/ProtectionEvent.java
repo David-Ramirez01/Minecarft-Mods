@@ -6,6 +6,7 @@ import com.tumod.protectormod.util.ClanSavedData;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.damagesource.DamageTypes;
@@ -40,7 +41,6 @@ public class ProtectionEvent {
 
     @SubscribeEvent
     public static void onBlockBreak(BlockEvent.BreakEvent event) {
-        System.out.println("DEBUG: Intento de romper bloque en " + event.getPos());
         if (isActionRestricted(event.getPlayer(), event.getPos(), "break", true)) {
             event.setCanceled(true);
             event.getPlayer().displayClientMessage(Component.literal("§c[!] No puedes romper bloques aquí."), true);
@@ -151,41 +151,6 @@ public class ProtectionEvent {
         }
     }
 
-    @SubscribeEvent
-    public static void onServerChat(ServerChatEvent event) {
-        ServerPlayer player = event.getPlayer();
-        ClanSavedData data = ClanSavedData.get(player.serverLevel());
-
-        // Buscamos el clan (ya sea líder o miembro)
-        ClanSavedData.ClanInstance clan = data.getClanByMember(player.getUUID());
-
-        if (clan != null && !clan.name.isEmpty()) {
-            // Formato limpio: [NombreClan] Jugador: Mensaje
-            Component clanPrefix = Component.literal("§8[§6" + clan.name + "§8] ");
-
-            // Aplicamos el prefijo al mensaje
-            event.setMessage(Component.empty()
-                    .append(clanPrefix)
-                    .append(player.getDisplayName())
-                    .append(": ")
-                    .append(event.getMessage()));
-        }
-    }
-
-    @SubscribeEvent
-    public static void onNameFormat(PlayerEvent.NameFormat event) {
-        if (event.getEntity() instanceof ServerPlayer player) {
-            ClanSavedData data = ClanSavedData.get(player.serverLevel());
-            ClanSavedData.ClanInstance clan = data.getClanByMember(player.getUUID());
-
-            if (clan != null) {
-                // Solo añadimos el nombre del clan como prefijo visual
-                Component displayName = Component.literal("§8[§6" + clan.name + "§8] ")
-                        .append(event.getDisplayname());
-                event.setDisplayname(displayName);
-            }
-        }
-    }
 
     private static void updateEntryMessage(Player player, @Nullable ProtectionCoreBlockEntity core) {
         UUID uuid = player.getUUID();
@@ -245,11 +210,6 @@ public class ProtectionEvent {
         // Si la flag es TRUE -> Significa que la acción es PÚBLICA (No restringir)
         // Si la flag es FALSE -> Significa que está PROTEGIDO (Restringir)
         boolean estaPermitidoPublicamente = core.getFlag(isBreak ? "break" : "build");
-
-        // LOG DE DEBUG (Solo para nosotros en consola)
-        System.out.println("DEBUG: Jugador " + player.getName().getString() +
-                " intentó " + (isBreak ? "romper" : "poner") +
-                " | Flag Pública: " + estaPermitidoPublicamente);
 
         // Retornamos el opuesto: si está permitido, la restricción es FALSE.
         return !estaPermitidoPublicamente;
@@ -314,16 +274,35 @@ public class ProtectionEvent {
     }
 
     private static void renderAreaParticles(ServerLevel level, Player player) {
+        // Solo enviamos partículas al jugador que tiene el visualizador activo
+        ServerPlayer sPlayer = (ServerPlayer) player;
+
         for (ProtectionCoreBlockEntity core : ProtectionCoreBlockEntity.getLoadedCores()) {
-            if (core.getBlockPos().closerThan(player.blockPosition(), 32)) {
+            // Aumentamos el rango de visibilidad a 64 para que no aparezcan de golpe
+            if (core.getLevel() == level && core.getBlockPos().closerThan(player.blockPosition(), 64)) {
                 BlockPos center = core.getBlockPos();
                 int r = core.getRadius();
+
+                // Usamos FLAME para Admin (más pesado) y END_ROD o WAX_ON para jugadores (más ligero)
                 var pType = core.isAdmin() ? ParticleTypes.SOUL_FIRE_FLAME : ParticleTypes.END_ROD;
+
+                // Altura fija ligeramente sobre el suelo donde está el jugador
+                double y = player.getY() + 0.5;
+
+                // Dibujamos el perímetro
                 for (int i = -r; i <= r; i += 2) {
-                    spawnEdgeParticle(level, pType, center.getX() + i + 0.5, player.getY() + 0.1, center.getZ() - r);
-                    spawnEdgeParticle(level, pType, center.getX() + i + 0.5, player.getY() + 0.1, center.getZ() + r + 1);
-                    spawnEdgeParticle(level, pType, center.getX() - r, player.getY() + 0.1, center.getZ() + i + 0.5);
-                    spawnEdgeParticle(level, pType, center.getX() + r + 1, player.getY() + 0.1, center.getZ() + i + 0.5);
+                    // El parámetro 'count: 1' y 'speed: 0' asegura que la partícula no salga disparada
+                    sPlayer.connection.send(new ClientboundLevelParticlesPacket(
+                            pType, false, center.getX() + i + 0.5, y, center.getZ() - r + 0.5, 0, 0, 0, 0, 1));
+
+                    sPlayer.connection.send(new ClientboundLevelParticlesPacket(
+                            pType, false, center.getX() + i + 0.5, y, center.getZ() + r + 0.5, 0, 0, 0, 0, 1));
+
+                    sPlayer.connection.send(new ClientboundLevelParticlesPacket(
+                            pType, false, center.getX() - r + 0.5, y, center.getZ() + i + 0.5, 0, 0, 0, 0, 1));
+
+                    sPlayer.connection.send(new ClientboundLevelParticlesPacket(
+                            pType, false, center.getX() + r + 0.5, y, center.getZ() + i + 0.5, 0, 0, 0, 0, 1));
                 }
             }
         }

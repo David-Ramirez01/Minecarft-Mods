@@ -38,13 +38,24 @@ public class ClanSavedData extends SavedData {
     // --- MÉTODOS PARA EL BLOQUE CORE (Creación y Conteo) ---
 
     public boolean tryCreateClan(String name, UUID owner, String ownerName, BlockPos pos) {
-        // Si el nombre ya existe (ignorando mayúsculas) o el jugador ya es líder de otro clan, fallar
-        if (clans.containsKey(name.toLowerCase()) || getClanByLeader(owner) != null) {
-            return false;
+        String lowerName = name.toLowerCase();
+
+        // 1. Verificar si el nombre ya existe
+        if (this.clans.containsKey(lowerName)) {
+            return false; // Nombre en uso
         }
 
-        clans.put(name.toLowerCase(), new ClanInstance(name, owner, ownerName, pos));
-        setDirty();
+        // 2. Verificar si el jugador YA es líder de un clan
+        // Usamos el método getClanByLeader que añadimos antes
+        if (getClanByLeader(owner) != null) {
+            return false; // Ya tiene un clan
+        }
+
+        // Si pasa las validaciones, creamos la instancia
+        ClanInstance newClan = new ClanInstance(name, owner, ownerName, pos);
+        this.clans.put(lowerName, newClan);
+
+        setDirty(); // Guardar cambios en disco
         return true;
     }
 
@@ -98,11 +109,20 @@ public class ClanSavedData extends SavedData {
     }
 
     public boolean hasClan(UUID playerUUID) {
-        return getClanByMember(playerUUID) != null;
+        // Retorna true si el jugador es líder de algún clan
+        return getClanByLeader(playerUUID) != null;
     }
 
     public void deleteClan(UUID ownerUUID) {
         clans.entrySet().removeIf(entry -> entry.getValue().leaderUUID.equals(ownerUUID));
+        setDirty();
+    }
+
+    public void forceRemovePlayerFromAllClans(UUID playerUUID) {
+        // Elimina clanes donde sea líder
+        clans.entrySet().removeIf(entry -> entry.getValue().leaderUUID.equals(playerUUID));
+        // Elimina al jugador de listas de miembros de otros clanes
+        clans.values().forEach(clan -> clan.members.remove(playerUUID));
         setDirty();
     }
 

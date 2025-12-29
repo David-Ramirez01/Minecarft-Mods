@@ -212,11 +212,11 @@ public class ProtectionCoreScreen extends AbstractContainerScreen<ProtectionCore
         int x = (this.width - this.imageWidth) / 2;
         int y = (this.height - this.imageHeight) / 2;
 
-        // --- 1. TÍTULOS DE LAS SECCIONES (Encima de los cuadros) ---
-        // Título sobre el EditBox de invitar
+        // --- 1. TÍTULOS ---
         graphics.drawString(this.font, "§6§lInvitar Jugadores", x + 10, y + 22, 0xFFFFFF, false);
 
         // --- 2. LÓGICA DE BOTÓN CLAN Y UPGRADE ---
+        // Clan
         boolean alreadyHasClan = core.getClanName() != null && !core.getClanName().isEmpty();
         this.clanButton.active = guests.size() >= 3 && !alreadyHasClan;
 
@@ -226,8 +226,18 @@ public class ProtectionCoreScreen extends AbstractContainerScreen<ProtectionCore
             this.clanButton.setMessage(Component.literal("Crear Clan"));
         }
 
+        // Upgrade (DESACTIVACIÓN AQUÍ)
         int currentLevel = core.getCoreLevel();
         boolean isMax = currentLevel >= 5;
+
+        if (this.upgradeButton != null) {
+            this.upgradeButton.active = !isMax; // Se desactiva si es nivel 5
+            if (isMax) {
+                this.upgradeButton.setMessage(Component.literal("MAX"));
+            } else {
+                this.upgradeButton.setMessage(Component.translatable("gui.protectormod.protection_core.upgrade"));
+            }
+        }
 
         // --- 3. LÓGICA DE PERMISOS DINÁMICOS ---
         String currentInput = nameInput.getValue().trim();
@@ -252,7 +262,7 @@ public class ProtectionCoreScreen extends AbstractContainerScreen<ProtectionCore
 
         // Renderizado de Nivel superior
         Component levelText = Component.literal("Nivel " + currentLevel + (isMax ? " §6§l(MAX)" : ""));
-        graphics.drawString(this.font, levelText, x + 12, y + 13, 0x404040, false);
+        graphics.drawString(this.font, levelText, x + 12, y + 14, 0x404040, false);
 
         // --- 4. RENDERIZADO DE LISTA Y REQUISITOS ---
         renderGuestList(graphics, mouseX, mouseY);
