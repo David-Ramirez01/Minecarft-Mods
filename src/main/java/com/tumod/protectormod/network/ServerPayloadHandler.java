@@ -3,7 +3,10 @@ package com.tumod.protectormod.network;
 import com.tumod.protectormod.blockentity.ProtectionCoreBlockEntity;
 import com.tumod.protectormod.menu.ProtectionCoreMenu;
 import com.tumod.protectormod.util.InviteManager;
+import com.tumod.protectormod.util.ProtectionDataManager;
+import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.Level;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
@@ -57,60 +60,57 @@ public class ServerPayloadHandler {
             Level level = player.level();
 
             if (level.getBlockEntity(payload.pos()) instanceof ProtectionCoreBlockEntity core) {
-                // SEGURIDAD: Solo el dueño o Admin
                 if (player.getUUID().equals(core.getOwnerUUID()) || player.hasPermissions(2)) {
 
-                    // 1. CASO ELIMINAR: Borrado instantáneo
+                    // 1. CASO ELIMINAR
                     if (payload.permissionType().equals("remove")) {
+                        // Debes asegurarte de que este método en el Core acepte String o buscar el UUID
                         core.removePlayerPermissions(payload.playerName());
                         player.displayClientMessage(Component.literal("§c[!] §fJugador §b" + payload.playerName() + "§f eliminado."), true);
                         core.markDirtyAndUpdate();
                         return;
                     }
 
-                    // 2. CASO JUGADOR EXISTENTE: Modificar sin invitar
+                    // 2. CASO JUGADOR EXISTENTE
+                    // Cambiado para usar el nuevo mapa de permisos del Core
                     if (core.getPlayersWithAnyPermission().contains(payload.playerName())) {
+                        // FIX: Asegúrate de que el Core tenga este método exacto o pásale el UUID si lo tienes
                         core.updatePermission(payload.playerName(), payload.permissionType(), payload.value());
                         player.displayClientMessage(Component.literal("§7[§6Protector§7] §fPermisos de §b" + payload.playerName() + "§f actualizados."), true);
                         core.markDirtyAndUpdate();
                         return;
                     }
 
-                    // --- VALIDACIÓN DE LÍMITE DE INVITADOS (NUEVO) ---
-                    // Si el jugador no existe en la lista y ya hay 8, bloqueamos la invitación.
+
+
+                    // --- VALIDACIÓN DE LÍMITE ---
                     if (core.getPlayersWithAnyPermission().size() >= 8) {
-                        player.displayClientMessage(Component.literal("§c[!] El núcleo ya alcanzó el límite máximo de 8 invitados."), true);
+                        player.displayClientMessage(Component.literal("§c[!] El núcleo ya alcanzó el límite de 8 invitados."), true);
                         return;
                     }
 
-                    // 3. CASO JUGADOR NUEVO: Lógica de invitación
+                    // 3. CASO JUGADOR NUEVO (Invitación)
                     ServerPlayer target = level.getServer().getPlayerList().getPlayerByName(payload.playerName());
-
                     if (target == null) {
-                        player.displayClientMessage(Component.literal("§c[!] El jugador no está en línea para recibir la invitación."), true);
+                        player.displayClientMessage(Component.literal("§c[!] El jugador no está en línea."), true);
                         return;
                     }
 
-                    if (target == player) {
-                        player.displayClientMessage(Component.literal("§c[!] No puedes invitarte a ti mismo."), true);
-                        return;
-                    }
-
-                    // Registrar la invitación pendiente
                     InviteManager.addInvite(target.getUUID(), payload.pos(), player.getUUID());
 
-                    player.displayClientMessage(Component.literal("§eInvitación enviada a §b" + payload.playerName() + "§e..."), true);
-
-                    // Mensaje interactivo
-                    target.sendSystemMessage(Component.literal("\n§6§l[Protector] §f" + player.getName().getString() + " te ha invitado a su zona.")
-                            .append("\n§7Tienes 1 minuto para responder:")
-                            .append("\n\n")
+                    Component msg = Component.literal("\n§6§l[Protector] §fInvitación de §b" + player.getName().getString() + "\n")
                             .append(Component.literal("§a§l[ACEPTAR] ")
-                                    .withStyle(s -> s.withClickEvent(new net.minecraft.network.chat.ClickEvent(net.minecraft.network.chat.ClickEvent.Action.RUN_COMMAND, "/protector accept"))))
-                            .append("   ")
+                                    .withStyle(s -> s.withClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND, "/protector accept"))
+                                            .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT, Component.literal("Unirse al núcleo")))))
+                            .append(Component.literal("  ") ) // Espacio
                             .append(Component.literal("§c§l[RECHAZAR]")
-                                    .withStyle(s -> s.withClickEvent(new net.minecraft.network.chat.ClickEvent(net.minecraft.network.chat.ClickEvent.Action.RUN_COMMAND, "/protector deny"))))
-                            .append("\n"));
+                                    .withStyle(s -> s.withClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND, "/protector deny"))
+                                            .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT, Component.literal("Ignorar invitación")))));
+
+                    target.sendSystemMessage(msg);
+                    // Sonido de notificación para el invitado
+                    target.playNotifySound(net.minecraft.sounds.SoundEvents.NOTE_BLOCK_CHIME.value(),
+                            net.minecraft.sounds.SoundSource.PLAYERS, 1.0f, 1.0f);
                 }
             }
         });
@@ -150,15 +150,13 @@ public class ServerPayloadHandler {
 
                 if (creado) {
                     core.setClanName(name);
-                    core.setOwner(owner.getUUID());
+                    // FIX: Ahora pasamos ambos datos para que el Core guarde nombre y UUID del dueño
+                    core.setOwner(owner.getUUID(), owner.getName().getString());
 
-                    // Notificación Global
-                    Component chatMsg = Component.literal("§6§l[Clan] §f" + owner.getName().getString() + " ha fundado: §b" + name);
-                    serverLevel.getServer().getPlayerList().broadcastSystemMessage(chatMsg, false);
-
-                    // Efecto de sonido de éxito para el fundador
-                    owner.playNotifySound(net.minecraft.sounds.SoundEvents.PLAYER_LEVELUP, net.minecraft.sounds.SoundSource.PLAYERS, 1.0f, 1.0f);
-
+                    serverLevel.getServer().getPlayerList().broadcastSystemMessage(
+                            Component.literal("§6§l[Clan] §f" + owner.getName().getString() + " ha fundado: §b" + name),
+                            false
+                    );
                     core.markDirtyAndUpdate();
                 }
             }
@@ -168,21 +166,34 @@ public class ServerPayloadHandler {
     public static void handleAdminUpdate(UpdateAdminCorePayload payload, IPayloadContext context) {
         context.enqueueWork(() -> {
             Player player = context.player();
+            Level level = player.level();
 
-            // Solo nivel 2 (OP) puede usar este paquete masivo
-            if (player.hasPermissions(2)) {
-                Level level = player.level();
-                if (level.getBlockEntity(payload.pos()) instanceof ProtectionCoreBlockEntity core) {
+            if (player.hasPermissions(2) && level.getBlockEntity(payload.pos()) instanceof ProtectionCoreBlockEntity core) {
+                core.setAdminRadius(payload.radius());
 
-                    core.setAdminRadius(payload.radius());
+                // Sincronizamos TODAS las flags relacionadas con construcción e interacción
+                boolean canBuild = payload.canBuild();
+                core.setFlag("break", canBuild);
+                core.setFlag("build", canBuild);
+                core.setFlag("interact", canBuild); // Si permites construir, sueles permitir interactuar
+                core.setFlag("chests", canBuild);   // Para el Admin Core, esto suele ir ligado al build general
+                core.setFlag("pvp", payload.pvp());
+                core.setFlag("explosions", payload.explosions());
 
-                    // Actualizamos las flags principales usando la lógica de flags
-                    core.setFlag("pvp", payload.pvp());
-                    core.setFlag("explosions", payload.explosions());
+                // Actualizar Manager Global
+                ProtectionDataManager.get(level).addOrUpdateCore(payload.pos(), core.getOwnerUUID(), payload.radius());
 
-                    core.markDirtyAndUpdate();
-                    player.displayClientMessage(Component.literal("§d[Admin]§a Área administrativa sincronizada."), true);
+                ProtectionDataManager data = ProtectionDataManager.get(level);
+                data.addOrUpdateCore(payload.pos(), core.getOwnerUUID(), payload.radius());
+
+                if (level instanceof ServerLevel sLevel) {
+                    sLevel.getChunkSource().blockChanged(payload.pos());
+                    data.syncToAll(sLevel);
                 }
+                core.setChanged();
+                level.sendBlockUpdated(payload.pos(), core.getBlockState(), core.getBlockState(), 3);
+
+                player.displayClientMessage(Component.literal("§d[Admin]§a Flags de construcción y cofres actualizadas."), true);
             }
         });
     }
@@ -210,22 +221,28 @@ public class ServerPayloadHandler {
             if (level.getBlockEntity(payload.pos()) instanceof ProtectionCoreBlockEntity core) {
                 String flagId = payload.flag();
 
-                // SEGURIDAD NIVELADA:
-                // canPlayerEditFlag verifica:
-                // - Si es Admin (OP): Puede todo.
-                // - Si es Dueño: Solo puede editar las BASIC_FLAGS.
+                // 1. Verificación de Seguridad y Niveles
+                // Asegúrate de que core.canPlayerEditFlag compruebe si el nivel del core permite esa flag
                 if (core.canPlayerEditFlag(player, flagId)) {
 
-                    boolean currentValue = core.getFlag(flagId);
-                    core.setFlag(flagId, !currentValue);
+                    boolean newValue = !core.getFlag(flagId);
+                    core.setFlag(flagId, newValue);
 
-                    core.markDirtyAndUpdate();
+                    // IMPORTANTE: Sincronización
+                    core.setChanged();
+                    level.sendBlockUpdated(payload.pos(), core.getBlockState(), core.getBlockState(), 3);
 
-                    player.displayClientMessage(Component.literal("§6[Core] §f" + flagId + " §7➜ " +
-                            (!currentValue ? "§aHABILITADO" : "§cDESHABILITADO")), true);
+                    // Feedback visual y sonoro
+                    String status = newValue ? "§aHABILITADO" : "§cDESHABILITADO";
+                    player.displayClientMessage(Component.literal("§6[Core] §f" + flagId + " §7➜ " + status), true);
+
+                    // Si el jugador es ServerPlayer, podemos enviar un sonido de "click"
+                    if (player instanceof net.minecraft.server.level.ServerPlayer sPlayer) {
+                        sPlayer.playNotifySound(net.minecraft.sounds.SoundEvents.UI_BUTTON_CLICK.value(),
+                                net.minecraft.sounds.SoundSource.BLOCKS, 1.0f, 1.0f);
+                    }
                 } else {
-                    // Si un usuario normal intenta cambiar una flag administrativa
-                    player.displayClientMessage(Component.literal("§c[!] No tienes permiso para editar la configuración de: " + flagId), true);
+                    player.displayClientMessage(Component.literal("§c[!] Nivel insuficiente o sin permisos para: " + flagId), true);
                 }
             }
         });

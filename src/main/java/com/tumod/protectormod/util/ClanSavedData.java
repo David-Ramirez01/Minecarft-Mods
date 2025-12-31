@@ -59,6 +59,12 @@ public class ClanSavedData extends SavedData {
         return true;
     }
 
+    // Añade esto dentro de la clase ClanSavedData
+    public void setServerMaxCores(int cantidad) {
+        this.serverMaxCores = cantidad;
+        this.setDirty(); // Indica a Minecraft que debe escribir los datos en el disco
+    }
+
     public int getPlayerCoreCount(UUID playerUUID) {
         int count = 0;
         for (ClanInstance clan : clans.values()) {

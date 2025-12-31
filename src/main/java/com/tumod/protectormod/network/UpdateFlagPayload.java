@@ -1,6 +1,5 @@
 package com.tumod.protectormod.network;
 
-import com.tumod.protectormod.ProtectorMod;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.codec.ByteBufCodecs;

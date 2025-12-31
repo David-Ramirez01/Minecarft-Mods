@@ -1,35 +1,41 @@
 package com.tumod.protectormod.protection;
 
 import com.tumod.protectormod.blockentity.ProtectionCoreBlockEntity;
+import com.tumod.protectormod.util.ProtectionDataManager;
 import net.minecraft.core.BlockPos;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.LevelAccessor;
+import net.minecraft.world.level.block.entity.BlockEntity;
 
 public class ProtectionUtils {
 
     /**
      * Busca si existe un núcleo de protección que cubra la posición dada.
+     * Migrado para usar ProtectionDataManager (Evita lag por iteración masiva).
      */
     public static ProtectionCoreBlockEntity getCoreAt(LevelAccessor accessor, BlockPos pos) {
-        // En 1.21.1, LevelAccessor es la forma segura de manejar mundos en eventos
-        if (!(accessor instanceof Level level)) {
+        // El Manager solo funciona en el lado del servidor (ServerLevel)
+        if (!(accessor instanceof ServerLevel sLevel)) {
             return null;
         }
 
-        // Iteramos sobre la lista estática global de núcleos cargados
-        for (ProtectionCoreBlockEntity core : ProtectionCoreBlockEntity.getLoadedCores()) {
+        // 1. Buscamos en el Manager si hay alguna protección registrada en esta coordenada
+        ProtectionDataManager manager = ProtectionDataManager.get(sLevel);
+        ProtectionDataManager.CoreEntry entry = manager.getCoreAt(pos);
 
-            // 1. Verificar que el core sigue siendo válido y está en el mismo nivel
-            if (core.isRemoved() || core.getLevel() != level) {
-                continue;
-            }
+        if (entry != null) {
+            // 2. Si hay una entrada, obtenemos la BlockEntity física para verificar permisos/flags
+            BlockEntity be = sLevel.getBlockEntity(entry.pos());
 
-            // 2. Usar la lógica de bounds del Core para verificar si la posición está dentro
-            // Esto asegura que si cambias la forma del área en el Core, se aplique aquí también
-            if (core.isInside(pos)) {
-                return core;
+            if (be instanceof ProtectionCoreBlockEntity core) {
+                // 3. Verificamos que el área realmente lo cubra (doble check de radio)
+                if (!core.isRemoved() && core.isInside(pos)) {
+                    return core;
+                }
             }
         }
+
         return null;
     }
 }

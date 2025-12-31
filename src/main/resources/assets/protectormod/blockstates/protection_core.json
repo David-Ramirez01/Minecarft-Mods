@@ -1,28 +1,28 @@
 {
   "variants": {
-    "facing=north,half=lower,level=1": { "model": "protectormod:block/protection_core", "textures": { "5": "minecraft:block/copper_block", "2": "minecraft:block/copper_block" } },
-    "facing=north,half=lower,level=2": { "model": "protectormod:block/protection_core", "textures": { "5": "minecraft:block/iron_block", "2": "minecraft:block/iron_block" } },
-    "facing=north,half=lower,level=3": { "model": "protectormod:block/protection_core", "textures": { "5": "minecraft:block/gold_block", "2": "minecraft:block/gold_block" } },
-    "facing=north,half=lower,level=4": { "model": "protectormod:block/protection_core", "textures": { "5": "minecraft:block/diamond_block", "2": "minecraft:block/diamond_block" } },
-    "facing=north,half=lower,level=5": { "model": "protectormod:block/protection_core", "textures": { "5": "minecraft:block/netherite_block", "2": "minecraft:block/netherite_block" } },
+    "facing=north,half=lower,level=1": { "model": "protectormod:block/protection_core_copper" },
+    "facing=north,half=lower,level=2": { "model": "protectormod:block/protection_core_iron" },
+    "facing=north,half=lower,level=3": { "model": "protectormod:block/protection_core_gold" },
+    "facing=north,half=lower,level=4": { "model": "protectormod:block/protection_core_diamond" },
+    "facing=north,half=lower,level=5": { "model": "protectormod:block/protection_core_netherite" },
 
-    "facing=south,half=lower,level=1": { "model": "protectormod:block/protection_core", "y": 180, "textures": { "5": "minecraft:block/copper_block", "2": "minecraft:block/copper_block" } },
-    "facing=south,half=lower,level=2": { "model": "protectormod:block/protection_core", "y": 180, "textures": { "5": "minecraft:block/iron_block", "2": "minecraft:block/iron_block" } },
-    "facing=south,half=lower,level=3": { "model": "protectormod:block/protection_core", "y": 180, "textures": { "5": "minecraft:block/gold_block", "2": "minecraft:block/gold_block" } },
-    "facing=south,half=lower,level=4": { "model": "protectormod:block/protection_core", "y": 180, "textures": { "5": "minecraft:block/diamond_block", "2": "minecraft:block/diamond_block" } },
-    "facing=south,half=lower,level=5": { "model": "protectormod:block/protection_core", "y": 180, "textures": { "5": "minecraft:block/netherite_block", "2": "minecraft:block/netherite_block" } },
+    "facing=east,half=lower,level=1":  { "model": "protectormod:block/protection_core_copper", "y": 90 },
+    "facing=east,half=lower,level=2":  { "model": "protectormod:block/protection_core_iron", "y": 90 },
+    "facing=east,half=lower,level=3":  { "model": "protectormod:block/protection_core_gold", "y": 90 },
+    "facing=east,half=lower,level=4":  { "model": "protectormod:block/protection_core_diamond", "y": 90 },
+    "facing=east,half=lower,level=5":  { "model": "protectormod:block/protection_core_netherite", "y": 90 },
 
-    "facing=east,half=lower,level=1":  { "model": "protectormod:block/protection_core", "y": 90, "textures": { "5": "minecraft:block/copper_block", "2": "minecraft:block/copper_block" } },
-    "facing=east,half=lower,level=2":  { "model": "protectormod:block/protection_core", "y": 90, "textures": { "5": "minecraft:block/iron_block", "2": "minecraft:block/iron_block" } },
-    "facing=east,half=lower,level=3":  { "model": "protectormod:block/protection_core", "y": 90, "textures": { "5": "minecraft:block/gold_block", "2": "minecraft:block/gold_block" } },
-    "facing=east,half=lower,level=4":  { "model": "protectormod:block/protection_core", "y": 90, "textures": { "5": "minecraft:block/diamond_block", "2": "minecraft:block/diamond_block" } },
-    "facing=east,half=lower,level=5":  { "model": "protectormod:block/protection_core", "y": 90, "textures": { "5": "minecraft:block/netherite_block", "2": "minecraft:block/netherite_block" } },
+    "facing=south,half=lower,level=1": { "model": "protectormod:block/protection_core_copper", "y": 180 },
+    "facing=south,half=lower,level=2": { "model": "protectormod:block/protection_core_iron", "y": 180 },
+    "facing=south,half=lower,level=3": { "model": "protectormod:block/protection_core_gold", "y": 180 },
+    "facing=south,half=lower,level=4": { "model": "protectormod:block/protection_core_diamond", "y": 180 },
+    "facing=south,half=lower,level=5": { "model": "protectormod:block/protection_core_netherite", "y": 180 },
 
-    "facing=west,half=lower,level=1":  { "model": "protectormod:block/protection_core", "y": 270, "textures": { "5": "minecraft:block/copper_block", "2": "minecraft:block/copper_block" } },
-    "facing=west,half=lower,level=2":  { "model": "protectormod:block/protection_core", "y": 270, "textures": { "5": "minecraft:block/iron_block", "2": "minecraft:block/iron_block" } },
-    "facing=west,half=lower,level=3":  { "model": "protectormod:block/protection_core", "y": 270, "textures": { "5": "minecraft:block/gold_block", "2": "minecraft:block/gold_block" } },
-    "facing=west,half=lower,level=4":  { "model": "protectormod:block/protection_core", "y": 270, "textures": { "5": "minecraft:block/diamond_block", "2": "minecraft:block/diamond_block" } },
-    "facing=west,half=lower,level=5":  { "model": "protectormod:block/protection_core", "y": 270, "textures": { "5": "minecraft:block/netherite_block", "2": "minecraft:block/netherite_block" } },
+    "facing=west,half=lower,level=1":  { "model": "protectormod:block/protection_core_copper", "y": 270 },
+    "facing=west,half=lower,level=2":  { "model": "protectormod:block/protection_core_iron", "y": 270 },
+    "facing=west,half=lower,level=3":  { "model": "protectormod:block/protection_core_gold", "y": 270 },
+    "facing=west,half=lower,level=4":  { "model": "protectormod:block/protection_core_diamond", "y": 270 },
+    "facing=west,half=lower,level=5":  { "model": "protectormod:block/protection_core_netherite", "y": 270 },
 
     "facing=north,half=upper,level=1": { "model": "protectormod:block/empty" },
     "facing=north,half=upper,level=2": { "model": "protectormod:block/empty" },
@@ -30,22 +30,22 @@
     "facing=north,half=upper,level=4": { "model": "protectormod:block/empty" },
     "facing=north,half=upper,level=5": { "model": "protectormod:block/empty" },
 
+    "facing=east,half=upper,level=1":  { "model": "protectormod:block/empty", "y": 90 },
+    "facing=east,half=upper,level=2":  { "model": "protectormod:block/empty", "y": 90 },
+    "facing=east,half=upper,level=3":  { "model": "protectormod:block/empty", "y": 90 },
+    "facing=east,half=upper,level=4":  { "model": "protectormod:block/empty", "y": 90 },
+    "facing=east,half=upper,level=5":  { "model": "protectormod:block/empty", "y": 90 },
+
     "facing=south,half=upper,level=1": { "model": "protectormod:block/empty", "y": 180 },
     "facing=south,half=upper,level=2": { "model": "protectormod:block/empty", "y": 180 },
     "facing=south,half=upper,level=3": { "model": "protectormod:block/empty", "y": 180 },
     "facing=south,half=upper,level=4": { "model": "protectormod:block/empty", "y": 180 },
     "facing=south,half=upper,level=5": { "model": "protectormod:block/empty", "y": 180 },
 
-    "facing=east,half=upper,level=1": { "model": "protectormod:block/empty", "y": 90 },
-    "facing=east,half=upper,level=2": { "model": "protectormod:block/empty", "y": 90 },
-    "facing=east,half=upper,level=3": { "model": "protectormod:block/empty", "y": 90 },
-    "facing=east,half=upper,level=4": { "model": "protectormod:block/empty", "y": 90 },
-    "facing=east,half=upper,level=5": { "model": "protectormod:block/empty", "y": 90 },
-
-    "facing=west,half=upper,level=1": { "model": "protectormod:block/empty", "y": 270 },
-    "facing=west,half=upper,level=2": { "model": "protectormod:block/empty", "y": 270 },
-    "facing=west,half=upper,level=3": { "model": "protectormod:block/empty", "y": 270 },
-    "facing=west,half=upper,level=4": { "model": "protectormod:block/empty", "y": 270 },
-    "facing=west,half=upper,level=5": { "model": "protectormod:block/empty", "y": 270 }
+    "facing=west,half=upper,level=1":  { "model": "protectormod:block/empty", "y": 270 },
+    "facing=west,half=upper,level=2":  { "model": "protectormod:block/empty", "y": 270 },
+    "facing=west,half=upper,level=3":  { "model": "protectormod:block/empty", "y": 270 },
+    "facing=west,half=upper,level=4":  { "model": "protectormod:block/empty", "y": 270 },
+    "facing=west,half=upper,level=5":  { "model": "protectormod:block/empty", "y": 270 }
   }
 }

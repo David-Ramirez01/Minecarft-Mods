@@ -2,7 +2,7 @@ package com.tumod.protectormod.event;
 
 import com.tumod.protectormod.ProtectorMod;
 import com.tumod.protectormod.blockentity.ProtectionCoreBlockEntity;
-import com.tumod.protectormod.util.ClanSavedData;
+import com.tumod.protectormod.util.ProtectionDataManager;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.network.chat.Component;
@@ -11,17 +11,17 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.damagesource.DamageTypes;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.LevelAccessor;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BlockEntity;
-import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
 import com.tumod.protectormod.command.ClanCommands;
-import net.neoforged.neoforge.event.ServerChatEvent;
 import net.neoforged.neoforge.event.entity.living.LivingIncomingDamageEvent;
-import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
 import net.neoforged.neoforge.event.level.BlockEvent;
 import net.neoforged.neoforge.event.level.ExplosionEvent;
@@ -35,49 +35,61 @@ import java.util.UUID;
 @EventBusSubscriber(modid = ProtectorMod.MOD_ID, bus = EventBusSubscriber.Bus.GAME)
 public class ProtectionEvent {
 
-    private static final Map<UUID, Boolean> PLAYER_INSIDE_CACHE = new HashMap<>();
+    private static final Map<UUID, BlockPos> PLAYER_CORE_CACHE = new HashMap<>();
 
     // --- 1. GESTIÓN DE BLOQUES ---
 
     @SubscribeEvent
     public static void onBlockBreak(BlockEvent.BreakEvent event) {
-        if (isActionRestricted(event.getPlayer(), event.getPos(), "break", true)) {
+        // Cambiamos a "build" para que una sola flag controle todo lo referente a obras
+        if (isActionRestricted(event.getPlayer(), event.getLevel(), event.getPos(), "build")) {
             event.setCanceled(true);
-            event.getPlayer().displayClientMessage(Component.literal("§c[!] No puedes romper bloques aquí."), true);
         }
     }
 
     @SubscribeEvent
     public static void onBlockPlace(BlockEvent.EntityPlaceEvent event) {
         if (event.getEntity() instanceof Player player) {
-            if (isActionRestricted(player, event.getPos(), "build", false)) {
+            // Usamos "build" consistentemente
+            if (isActionRestricted(player, event.getLevel(), event.getPos(), "build")) {
                 event.setCanceled(true);
-                player.displayClientMessage(Component.literal("§c[!] No tienes permiso para construir aquí."), true);
+            }
+        }
+    }
+
+    @SubscribeEvent
+    public static void onMobSpawn(net.neoforged.neoforge.event.entity.EntityJoinLevelEvent event) {
+        // Solo nos interesan los mobs hostiles (monstruos) y que sea en el servidor
+        if (event.getLevel().isClientSide || !(event.getEntity() instanceof net.minecraft.world.entity.monster.Monster mob)) return;
+
+        BlockPos pos = mob.blockPosition();
+        ServerLevel sLevel = (ServerLevel) event.getLevel();
+
+        ProtectionCoreBlockEntity core = findCoreAt(sLevel, pos);
+        if (core != null) {
+            // Buscamos la flag "mob-spawn". Si es FALSE (Roja), cancelamos el spawn.
+            if (!core.getFlag("mob-spawn")) {
+                event.setCanceled(true);
             }
         }
     }
 
     @SubscribeEvent
     public static void onBucketUse(PlayerInteractEvent.RightClickBlock event) {
-        Player player = event.getEntity();
-        if (event.getItemStack().getItem() instanceof net.minecraft.world.item.BucketItem) {
-            BlockPos targetPos = event.getPos().relative(event.getFace());
-            if (isActionRestricted(player, targetPos, "build", false)) {
-                event.setCanceled(true);
-                player.displayClientMessage(Component.literal("§c[!] No puedes usar cubos aquí."), true);
-            }
+        BlockPos targetPos = event.getPos().relative(event.getFace());
+        if (isActionRestricted(event.getEntity(), event.getLevel(), targetPos, "build")) {
+            event.setCanceled(true);
         }
     }
 
-    // --- 2. EXPLOSIONES (FIX ADMIN CORE) ---
+    // --- 2. EXPLOSIONES ---
 
     @SubscribeEvent
     public static void onExplosion(ExplosionEvent.Detonate event) {
-        Level level = (Level) event.getLevel();
-        // removeIf para filtrar bloques protegidos
+        if (!(event.getLevel() instanceof ServerLevel sLevel)) return;
+
         event.getAffectedBlocks().removeIf(pos -> {
-            ProtectionCoreBlockEntity core = findCoreAt(level, pos);
-            // Si la flag 'explosions' es false, el bloque NO se rompe
+            ProtectionCoreBlockEntity core = findCoreAt(sLevel, pos);
             return core != null && !core.getFlag("explosions");
         });
     }
@@ -86,183 +98,151 @@ public class ProtectionEvent {
 
     @SubscribeEvent
     public static void onDamage(LivingIncomingDamageEvent event) {
-        ProtectionCoreBlockEntity core = findCoreAt(event.getEntity().level(), event.getEntity().blockPosition());
+        if (!(event.getEntity().level() instanceof ServerLevel sLevel)) return;
+
+        ProtectionCoreBlockEntity core = findCoreAt(sLevel, event.getEntity().blockPosition());
         if (core == null) return;
 
-        if (event.getSource().getEntity() instanceof Player && event.getEntity() instanceof Player) {
-            if (!core.getFlag("pvp")) event.setCanceled(true);
+        // 1. Lógica de Fuego (del Admin Core)
+        if (event.getSource().is(DamageTypes.IN_FIRE) || event.getSource().is(DamageTypes.LAVA) || event.getSource().is(DamageTypes.ON_FIRE)) {
+            if (!core.getFlag("fire-damage")) {
+                event.setCanceled(true);
+                event.getEntity().setRemainingFireTicks(0); // Apaga al jugador
+                return;
+            }
         }
-        if (event.getSource().is(DamageTypes.FALL) && !core.getFlag("fall-damage")) event.setCanceled(true);
+
+        // 2. Lógica de PvP
+        if (event.getSource().getEntity() instanceof Player && event.getEntity() instanceof Player) {
+            if (!core.getFlag("pvp")) {
+                event.setCanceled(true);
+            }
+        }
+
+        // 3. Lógica de Caída
+        if (event.getSource().is(DamageTypes.FALL) && !core.getFlag("fall-damage")) {
+            event.setCanceled(true);
+        }
     }
+
 
     @SubscribeEvent
     public static void onInteractBlock(PlayerInteractEvent.RightClickBlock event) {
+        if (event.getLevel().isClientSide) return;
+
         BlockPos pos = event.getPos();
         Player player = event.getEntity();
-        ProtectionCoreBlockEntity core = findCoreAt(player.level(), pos);
+        ServerLevel sLevel = (ServerLevel) event.getLevel();
 
-        if (core == null || canBypass(player, core)) return;
+        ProtectionCoreBlockEntity core = findCoreAt(sLevel, pos);
+        // Si no hay core, o es el bloque físico del core, o el jugador es de confianza, permitimos.
+        if (core == null || pos.equals(core.getBlockPos()) || core.isTrusted(player)) return;
 
-        BlockEntity be = player.level().getBlockEntity(pos);
-        boolean isContainer = be != null && !(be instanceof ProtectionCoreBlockEntity);
-        String flagNeeded = isContainer ? "chests" : "interact";
+        BlockEntity be = sLevel.getBlockEntity(pos);
 
-        if (!core.hasPermission(player, flagNeeded) && !core.getFlag(flagNeeded)) {
+        // 🔹 Lógica de Flags Independiente
+        // Si el bloque tiene inventario, usamos "chests". Si no, es una interacción (puertas/palancas).
+        String flagNeeded = (be instanceof net.minecraft.world.Container) ? "chests" : "interact";
+
+        // Verificamos ÚNICAMENTE la flag necesaria.
+        if (!core.getFlag(flagNeeded)) {
             event.setCanceled(true);
-            player.displayClientMessage(Component.literal("§c[!] Esta interacción está bloqueada."), true);
+            String msg = flagNeeded.equals("chests") ? "§c[!] Los cofres están protegidos." : "§c[!] La interacción está desactivada.";
+            player.displayClientMessage(Component.literal(msg), true);
         }
     }
+
 
     // --- 4. TICKS Y MENSAJES ---
 
     @SubscribeEvent
     public static void onPlayerTick(PlayerTickEvent.Post event) {
         Player player = event.getEntity();
-        if (player.level().isClientSide) return;
+        if (player.level().isClientSide || player.tickCount % 20 != 0) return;
 
         ServerLevel level = (ServerLevel) player.level();
+        ProtectionCoreBlockEntity core = findCoreAt(level, player.blockPosition());
 
-        // 1. LÓGICA DEL VISUALIZADOR (Cada 10 ticks para mayor fluidez visual)
-        if (player.tickCount % 10 == 0) {
-            if (ClanCommands.VISUALIZER_ENABLED.contains(player.getUUID())) {
-                renderAreaParticles(level, player);
-            }
+        updateEntryMessage(player, core);
+
+        if (core != null) {
+            if (!core.getFlag("hunger")) player.getFoodData().setFoodLevel(20);
+            if (!core.getFlag("entry") && !canBypass(player, core)) ejectPlayer(player, core);
         }
 
-        // 2. LÓGICA DE PROTECCIÓN Y MENSAJES (Cada 20 ticks / 1 segundo)
-        if (player.tickCount % 20 == 0) {
-            ProtectionCoreBlockEntity core = findCoreAt(level, player.blockPosition());
-
-            // --- LLAMADA AL MENSAJE ---
-            updateEntryMessage(player, core);
-
-            // Lógica de flags pasivas
-            if (core != null) {
-                // Flag de Hambre (Si es false, el jugador no tiene hambre)
-                if (!core.getFlag("hunger")) {
-                    player.getFoodData().setFoodLevel(20);
-                }
-
-                // Flag de Entrada (Expulsión)
-                if (!core.getFlag("entry") && !canBypass(player, core)) {
-                    ejectPlayer(player, core);
-                }
-            }
+        // Lógica del visualizador
+        if (ClanCommands.VISUALIZER_ENABLED.contains(player.getUUID())) {
+            renderAreaParticles(level, player);
         }
     }
 
+    // --- 5. LÓGICA DE BÚSQUEDA CENTRALIZADA ---
 
-    private static void updateEntryMessage(Player player, @Nullable ProtectionCoreBlockEntity core) {
-        UUID uuid = player.getUUID();
-        boolean wasInside = PLAYER_INSIDE_CACHE.getOrDefault(uuid, false);
-        boolean isInside = core != null;
+    private static boolean isActionRestricted(Player player, LevelAccessor level, BlockPos pos, String action) {
+        if (level.isClientSide()) return false;
+        ServerLevel sLevel = (ServerLevel) level;
 
-        if (!wasInside && isInside) {
-            // 1. Verificar si el jugador quiere ver el mensaje (NBT del jugador)
-            boolean wantsPresentation = !player.getPersistentData().contains("ProtectorPresentation") ||
-                    player.getPersistentData().getBoolean("ProtectorPresentation");
-
-            if (wantsPresentation) {
-                // 2. Obtener el nombre a mostrar
-                String displayName = core.getOwnerName();
-
-                // Si es un Admin Core y el nombre es el genérico, poner "Administración"
-                if (core.isAdmin() && (displayName == null || displayName.equals("Protector"))) {
-                    displayName = "Administración";
-                }
-
-                // 3. Solo enviamos el mensaje si el jugador NO es el dueño
-                // (Para no spamear al dueño cada vez que entra a su casa)
-                if (!player.getUUID().equals(core.getOwnerUUID())) {
-                    player.displayClientMessage(
-                            Component.literal("§e§l[!] §fEntrando a la zona de: §b" + displayName),
-                            true
-                    );
-                }
-            }
-        }
-        else if (wasInside && !isInside) {
-            // Mensaje al salir
-            player.displayClientMessage(Component.literal("§aHas salido de la zona protegida"), true);
-        }
-
-        // Actualizar el cache
-        PLAYER_INSIDE_CACHE.put(uuid, isInside);
-    }
-
-    // --- 5. LÓGICA DE BÚSQUEDA (SIN DUPLICADOS) ---
-
-    private static boolean isActionRestricted(Player player, BlockPos pos, String flagKey, boolean isBreak) {
-        // 1. Bypass para Operadores
-        if (player.hasPermissions(2)) return false;
-
-        ProtectionCoreBlockEntity core = findCoreAt(player.level(), pos);
+        ProtectionCoreBlockEntity core = findCoreAt(sLevel, pos);
         if (core == null) return false;
 
-        // 2. Si es el DUEÑO, permitir siempre
-        if (player.getUUID().equals(core.getOwnerUUID())) return false;
+        // 1. JERARQUÍA 1: Si es Trusted (Dueño, OP, Clan, Invitado), omitimos las flags.
+        if (core.isTrusted(player)) return false;
 
-        // 3. Si es un INVITADO con permiso de 'build', permitir siempre
-        // (Asegúrate de que hasPermission use el nombre o UUID correctamente)
-        if (core.hasPermission(player, "build")) return false;
+        // 2. JERARQUÍA 2: Si NO es trusted, manda la Flag.
+        // Si la flag es TRUE (ON), significa que el acceso es PÚBLICO.
+        boolean isPublic = core.getFlag(action);
 
-        // 4. VERIFICACIÓN DE LA FLAG PÚBLICA
-        // Si la flag es TRUE -> Significa que la acción es PÚBLICA (No restringir)
-        // Si la flag es FALSE -> Significa que está PROTEGIDO (Restringir)
-        boolean estaPermitidoPublicamente = core.getFlag(isBreak ? "break" : "build");
-
-        // Retornamos el opuesto: si está permitido, la restricción es FALSE.
-        return !estaPermitidoPublicamente;
-    }
-    private static ProtectionCoreBlockEntity findCoreAt(Level level, BlockPos pos) {
-        // 1. Buscar en radio (Cubre Admin y Normales)
-        for (ProtectionCoreBlockEntity core : ProtectionCoreBlockEntity.getLoadedCores()) {
-            if (core.getLevel() == level && core.isInside(pos)) return core;
+        if (isPublic) {
+            return false; // La flag está en ON, cualquier usuario puede actuar.
+        } else {
+            // La flag está en OFF y el jugador no es de confianza: BLOQUEAR.
+            String ownerName = core.isAdmin() ? "Administración" : core.getOwnerName();
+            player.displayClientMessage(Component.literal("§c[!] Acción bloqueada por la protección de " + ownerName), true);
+            return true;
         }
-        // 2. Buscar por bloque físico o parte superior
-        BlockEntity be = level.getBlockEntity(pos);
-        if (be instanceof ProtectionCoreBlockEntity core) return core;
+    }
 
-        BlockState state = level.getBlockState(pos);
-        if (state.hasProperty(com.tumod.protectormod.block.ProtectionCoreBlock.HALF) &&
-                state.getValue(com.tumod.protectormod.block.ProtectionCoreBlock.HALF) == net.minecraft.world.level.block.state.properties.DoubleBlockHalf.UPPER) {
-            return findCoreAt(level, pos.below());
+    // Lógica para detección CUADRADA y VERTICAL COMPLETA
+    public static ProtectionCoreBlockEntity findCoreAt(Level level, BlockPos pos) {
+        if (!(level instanceof ServerLevel sLevel)) return null;
+
+        ProtectionDataManager manager = ProtectionDataManager.get(sLevel);
+        ProtectionDataManager.CoreEntry entry = manager.getCoreAt(pos);
+
+        if (entry != null) {
+            // Obtenemos la entidad de bloque real usando la posición guardada en el entry
+            if (sLevel.getBlockEntity(entry.pos()) instanceof ProtectionCoreBlockEntity core) {
+                return core;
+            }
         }
         return null;
     }
 
-    @SubscribeEvent
-    public static void onFireSpread(BlockEvent.PortalSpawnEvent event) {
-        // Nota: Algunas versiones usan BlockEvent.NeighborNotifyEvent o eventos de tick de bloque
-    }
+    // --- UTILIDADES ---
 
-    @SubscribeEvent
-    public static void onFireTick(BlockEvent.FarmlandTrampleEvent event) { /* ... */ }
+    private static void updateEntryMessage(Player player, @Nullable ProtectionCoreBlockEntity core) {
+        UUID uuid = player.getUUID();
+        BlockPos lastCorePos = PLAYER_CORE_CACHE.get(uuid); // Ahora devuelve BlockPos
+        BlockPos currentCorePos = (core != null) ? core.getBlockPos() : null;
 
-    // RECOMENDADO: Usa este evento para detectar fuego intentando colocarse
-    @SubscribeEvent
-    public static void onFirePlace(BlockEvent.EntityPlaceEvent event) {
-        // Verificamos si lo que se intenta colocar es fuego
-        if (event.getState().is(Blocks.FIRE) || event.getState().is(Blocks.SOUL_FIRE)) {
+        // Comparamos posiciones de bloques (IDs únicos)
+        if (!java.util.Objects.equals(lastCorePos, currentCorePos)) {
+            if (currentCorePos != null) {
+                // ENTRANDO
+                String displayName = core.isAdmin() ? "§d§lAdministración" : "§b" + core.getOwnerName();
 
-            // Convertimos LevelAccessor a Level de forma segura
-            if (event.getLevel() instanceof Level world) {
-                ProtectionCoreBlockEntity core = findCoreAt(world, event.getPos());
-
-                // Si hay protección y la flag de propagación/fuego está desactivada (false)
-                if (core != null && !core.getFlag("fire-spread")) {
-                    event.setCanceled(true);
+                // Solo enviamos el mensaje si el jugador no es el dueño
+                if (!player.getUUID().equals(core.getOwnerUUID())) {
+                    player.displayClientMessage(Component.literal("§e§l[!] §fEntrando a la zona de: " + displayName), true);
                 }
+            } else if (lastCorePos != null) {
+                // SALIENDO
+                player.displayClientMessage(Component.literal("§cHas salido de la zona protegida"), true);
             }
+
+            // Guardamos la nueva posición en la caché
+            PLAYER_CORE_CACHE.put(uuid, currentCorePos);
         }
-    }
-
-    private static boolean canBypass(Player player, ProtectionCoreBlockEntity core) {
-        return player.getUUID().equals(core.getOwnerUUID()) || player.hasPermissions(2);
-    }
-
-    private static boolean estaVisualizadorActivo(Player player) {
-        return com.tumod.protectormod.command.ClanCommands.VISUALIZER_ENABLED.contains(player.getUUID());
     }
 
     private static void ejectPlayer(Player player, ProtectionCoreBlockEntity core) {
@@ -270,45 +250,68 @@ public class ProtectionEvent {
         double radius = core.getRadius() + 1.5;
         Vec3 exitPoint = coreCenter.add(player.position().subtract(coreCenter).normalize().scale(radius));
         player.teleportTo(exitPoint.x, player.getY(), exitPoint.z);
-        player.displayClientMessage(Component.literal("§c§l[!] §cEntrada restringida."), true);
+        player.displayClientMessage(Component.literal("§c§l[!] Entrada restringida."), true);
+    }
+
+    private static boolean canBypass(Player player, ProtectionCoreBlockEntity core) {
+        return player.getUUID().equals(core.getOwnerUUID()) || player.hasPermissions(2);
     }
 
     private static void renderAreaParticles(ServerLevel level, Player player) {
-        // Solo enviamos partículas al jugador que tiene el visualizador activo
         ServerPlayer sPlayer = (ServerPlayer) player;
+        ProtectionDataManager data = ProtectionDataManager.get(level);
 
-        for (ProtectionCoreBlockEntity core : ProtectionCoreBlockEntity.getLoadedCores()) {
-            // Aumentamos el rango de visibilidad a 64 para que no aparezcan de golpe
-            if (core.getLevel() == level && core.getBlockPos().closerThan(player.blockPosition(), 64)) {
-                BlockPos center = core.getBlockPos();
-                int r = core.getRadius();
+        for (Map.Entry<BlockPos, ProtectionDataManager.CoreEntry> entry : data.getAllCores().entrySet()) {
+            BlockPos center = entry.getKey();
+            if (!center.closerThan(player.blockPosition(), 64)) continue;
 
-                // Usamos FLAME para Admin (más pesado) y END_ROD o WAX_ON para jugadores (más ligero)
-                var pType = core.isAdmin() ? ParticleTypes.SOUL_FIRE_FLAME : ParticleTypes.END_ROD;
+            int r = entry.getValue().radius();
+            var pType = ParticleTypes.END_ROD;
+            double y = player.getY() + 0.5;
 
-                // Altura fija ligeramente sobre el suelo donde está el jugador
-                double y = player.getY() + 0.5;
+            for (int i = -r; i <= r; i += 2) {
+                sendParticle(sPlayer, pType, center.getX() + i + 0.5, y, center.getZ() - r + 0.5);
+                sendParticle(sPlayer, pType, center.getX() + i + 0.5, y, center.getZ() + r + 0.5);
+                sendParticle(sPlayer, pType, center.getX() - r + 0.5, y, center.getZ() + i + 0.5);
+                sendParticle(sPlayer, pType, center.getX() + r + 0.5, y, center.getZ() + i + 0.5);
+            }
+        }
+    }
 
-                // Dibujamos el perímetro
-                for (int i = -r; i <= r; i += 2) {
-                    // El parámetro 'count: 1' y 'speed: 0' asegura que la partícula no salga disparada
-                    sPlayer.connection.send(new ClientboundLevelParticlesPacket(
-                            pType, false, center.getX() + i + 0.5, y, center.getZ() - r + 0.5, 0, 0, 0, 0, 1));
+    @SubscribeEvent
+    public static void onFireSpread(BlockEvent.EntityPlaceEvent event) {
+        if (event.getState().is(Blocks.FIRE)) {
+            BlockPos pos = event.getPos();
+            Level level = (Level) event.getLevel();
 
-                    sPlayer.connection.send(new ClientboundLevelParticlesPacket(
-                            pType, false, center.getX() + i + 0.5, y, center.getZ() + r + 0.5, 0, 0, 0, 0, 1));
+            // Usamos tu método centralizado findCoreAt
+            ProtectionCoreBlockEntity core = findCoreAt(level, pos);
+            if (core != null && !core.getFlag("fire-spread")) {
+                event.setCanceled(true);
+            }
+        }
+    }
 
-                    sPlayer.connection.send(new ClientboundLevelParticlesPacket(
-                            pType, false, center.getX() - r + 0.5, y, center.getZ() + i + 0.5, 0, 0, 0, 0, 1));
 
-                    sPlayer.connection.send(new ClientboundLevelParticlesPacket(
-                            pType, false, center.getX() + r + 0.5, y, center.getZ() + i + 0.5, 0, 0, 0, 0, 1));
+    @SubscribeEvent
+    public static void onLighterUse(PlayerInteractEvent.RightClickBlock event) {
+        ItemStack item = event.getItemStack();
+        // Verificamos si es un mechero o carga ígnea
+        if (item.is(Items.FLINT_AND_STEEL) || item.is(Items.FIRE_CHARGE)) {
+            BlockPos targetPos = event.getPos().relative(event.getFace());
+            Player player = event.getEntity();
+
+            ProtectionCoreBlockEntity core = findCoreAt(player.level(), targetPos);
+            if (core != null) {
+                if (!core.getFlag("lighter") && !core.isTrusted(player)) {
+                    event.setCanceled(true);
+                    player.displayClientMessage(Component.literal("§c[!] El uso de fuego está desactivado aquí."), true);
                 }
             }
         }
     }
 
-    private static void spawnEdgeParticle(ServerLevel level, net.minecraft.core.particles.ParticleOptions type, double x, double y, double z) {
-        level.sendParticles(type, x, y, z, 1, 0, 0.05, 0, 0.01);
+    private static void sendParticle(ServerPlayer player, net.minecraft.core.particles.ParticleOptions type, double x, double y, double z) {
+        player.connection.send(new ClientboundLevelParticlesPacket(type, false, x, y, z, 0, 0, 0, 0, 1));
     }
 }

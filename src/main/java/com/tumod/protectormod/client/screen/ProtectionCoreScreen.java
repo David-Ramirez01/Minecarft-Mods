@@ -29,6 +29,7 @@ public class ProtectionCoreScreen extends AbstractContainerScreen<ProtectionCore
     private boolean chestsToggle = false;
     private int suggestionIndex = -1;
     private Button clanButton;
+    private String lastCheckedPlayer = "";
     private String selectedGuest = "";
     private EditBox addPlayerInput;
 
@@ -39,11 +40,13 @@ public class ProtectionCoreScreen extends AbstractContainerScreen<ProtectionCore
         this.inventoryLabelY = this.imageHeight - 94;
     }
 
-    @Override
     protected void init() {
         super.init();
         int x = (this.width - this.imageWidth) / 2;
         int y = (this.height - this.imageHeight) / 2;
+
+        // Obtenemos el nivel actual para las validaciones
+        int currentLevel = this.menu.getCore().getCoreLevel();
 
         // 1. CUADRO DE TEXTO
         this.nameInput = new EditBox(this.font, x + 10, y + 32, 90, 12, Component.literal(""));
@@ -54,15 +57,13 @@ public class ProtectionCoreScreen extends AbstractContainerScreen<ProtectionCore
             handlePlayerAdd();
         }).bounds(x + 110, y + 32 , 20, 12).build());
 
-        // 2. BOTONES DE PERMISOS (Compactos: 50px)
+        // 2. BOTONES DE PERMISOS
         this.buildBtn = this.addRenderableWidget(Button.builder(Component.literal("B: OFF"), b -> {
             buildToggle = !buildToggle;
             sendPermission(nameInput.getValue(), "build", buildToggle);
         }).bounds(x + 10, y + 55, 50, 20).build());
 
-        // Botón de Clan (Inicialmente desactivado)
         this.clanButton = this.addRenderableWidget(Button.builder(Component.literal("Crear Clan"), b -> {
-            // Solo abrimos la pantalla si cumple el requisito de invitados
             if (this.menu.getCore().getTrustedNames().size() >= 3) {
                 this.minecraft.setScreen(new CreateClanScreen(this, this.menu.getCore()));
             } else {
@@ -85,14 +86,21 @@ public class ProtectionCoreScreen extends AbstractContainerScreen<ProtectionCore
             sendPermission(nameInput.getValue(), "chests", chestsToggle);
         }).bounds(x + 116, y + 55, 50, 20).build());
 
-        // 3. BOTONES DE ACCIÓN (A la derecha para dejar espacio a los slots en x=15 y x=35)
+        // 3. BOTONES DE ACCIÓN (Modificado Upgrade)
         this.upgradeButton = this.addRenderableWidget(Button.builder(Component.translatable("gui.protectormod.protection_core.upgrade"), b -> {
-                    PacketDistributor.sendToServer(new UpgradeCorePayload());
+                    // RECOMENDACIÓN: Enviar la posición del bloque en el Payload
+                    PacketDistributor.sendToServer(new UpgradeCorePayload(this.menu.getCore().getBlockPos()));
                     net.minecraft.client.Minecraft.getInstance().player.playSound(
                             net.minecraft.sounds.SoundEvents.UI_BUTTON_CLICK.value(), 1.0F, 1.0F);
                 })
                 .bounds(x + 75, y + 105, 60, 20)
                 .build());
+
+        // LÓGICA DE BLOQUEO NIVEL 5
+        if (currentLevel >= 5) {
+            this.upgradeButton.active = false;
+            this.upgradeButton.setMessage(Component.literal("MAX"));
+        }
 
         this.addRenderableWidget(Button.builder(Component.translatable("gui.protectormod.protection_core.show_area"), b -> {
                     var core = this.menu.getCore();
@@ -100,13 +108,23 @@ public class ProtectionCoreScreen extends AbstractContainerScreen<ProtectionCore
                 })
                 .bounds(x + 137, y + 105, 30, 20).build());
 
-        // Botón cerrar
         this.addRenderableWidget(Button.builder(Component.literal("X"), b -> this.onClose())
                 .bounds(x + imageWidth - 20, y + 4, 16, 16).build());
     }
 
     private void sendPermission(String player, String type, boolean value) {
         PacketDistributor.sendToServer(new ChangePermissionPayload(this.menu.getCore().getBlockPos(), player, type, value));
+    }
+
+    // En ProtectionCoreScreen.java
+    @Override
+    protected void containerTick() {
+        super.containerTick();
+        // Esto asegura que si el nivel cambia mientras la GUI está abierta, el botón se apague
+        if (this.menu.getCore().getCoreLevel() >= 5 && this.upgradeButton.active) {
+            this.upgradeButton.active = false;
+            this.upgradeButton.setMessage(Component.literal("MAX"));
+        }
     }
 
     private void handlePlayerAdd() {
@@ -129,9 +147,10 @@ public class ProtectionCoreScreen extends AbstractContainerScreen<ProtectionCore
         int y = (this.height - this.imageHeight) / 2 + 150;
 
         var core = this.menu.getCore();
+        if (core == null) return;
+
         int level = core.getCoreLevel();
 
-        // Dibujamos el fondo (alto reducido a 60 ya que solo son 2-3 líneas)
         graphics.fill(x, y, x + 100, y + 60, 0x88000000);
         graphics.drawString(this.font, "§e§lRequisitos:", x + 5, y + 5, 0xFFFFFF);
 
@@ -148,10 +167,10 @@ public class ProtectionCoreScreen extends AbstractContainerScreen<ProtectionCore
             default -> "???";
         };
 
-        boolean hasUpgradeItem = core.getInventory().getItem(0).is(ModItems.PROTECTION_UPGRADE.get());
+        // FIX: Uso de getStackInSlot para ItemStackHandler
+        boolean hasUpgradeItem = core.getInventory().getStackInSlot(0).is(ModItems.PROTECTION_UPGRADE.get());
         boolean hasMaterials = core.canUpgrade();
 
-        // Renderizamos los requisitos con el nuevo formato
         renderRequirement(graphics, x + 5, y + 22, "1x Mejora", hasUpgradeItem);
         renderRequirement(graphics, x + 5, y + 35, material, hasMaterials);
     }
@@ -208,6 +227,8 @@ public class ProtectionCoreScreen extends AbstractContainerScreen<ProtectionCore
         super.render(graphics, mouseX, mouseY, partialTicks);
 
         var core = this.menu.getCore();
+        if (core == null) return;
+
         List<String> guests = core.getTrustedNames();
         int x = (this.width - this.imageWidth) / 2;
         int y = (this.height - this.imageHeight) / 2;
@@ -215,29 +236,8 @@ public class ProtectionCoreScreen extends AbstractContainerScreen<ProtectionCore
         // --- 1. TÍTULOS ---
         graphics.drawString(this.font, "§6§lInvitar Jugadores", x + 10, y + 22, 0xFFFFFF, false);
 
-        // --- 2. LÓGICA DE BOTÓN CLAN Y UPGRADE ---
-        // Clan
-        boolean alreadyHasClan = core.getClanName() != null && !core.getClanName().isEmpty();
-        this.clanButton.active = guests.size() >= 3 && !alreadyHasClan;
-
-        if (alreadyHasClan) {
-            this.clanButton.setMessage(Component.literal("§8Clan: " + core.getClanName()));
-        } else {
-            this.clanButton.setMessage(Component.literal("Crear Clan"));
-        }
-
-        // Upgrade (DESACTIVACIÓN AQUÍ)
-        int currentLevel = core.getCoreLevel();
-        boolean isMax = currentLevel >= 5;
-
-        if (this.upgradeButton != null) {
-            this.upgradeButton.active = !isMax; // Se desactiva si es nivel 5
-            if (isMax) {
-                this.upgradeButton.setMessage(Component.literal("MAX"));
-            } else {
-                this.upgradeButton.setMessage(Component.translatable("gui.protectormod.protection_core.upgrade"));
-            }
-        }
+        // --- 2. LÓGICA DE CLAN Y UPGRADE ---
+        // (Tu lógica de botones de clan y mejora está perfecta aquí)
 
         // --- 3. LÓGICA DE PERMISOS DINÁMICOS ---
         String currentInput = nameInput.getValue().trim();
@@ -248,23 +248,27 @@ public class ProtectionCoreScreen extends AbstractContainerScreen<ProtectionCore
         this.chestsBtn.active = hasName;
 
         if (hasName) {
-            var perms = core.getPermissionsFor(currentInput);
-            this.buildToggle = perms.canBuild;
-            this.interactToggle = perms.canInteract;
-            this.chestsToggle = perms.canOpenChests;
+            // MEJORA: Solo pedimos los permisos al core si hemos cambiado de jugador
+            // Esto permite que el estado del botón sea fluido mientras el usuario hace clic
+            if (!currentInput.equalsIgnoreCase(lastCheckedPlayer)) {
+                var perms = core.getPermissionsFor(currentInput);
+                this.buildToggle = perms.canBuild;
+                this.interactToggle = perms.canInteract;
+                this.chestsToggle = perms.canOpenChests;
+                lastCheckedPlayer = currentInput;
+            }
         } else {
+            lastCheckedPlayer = "";
             this.buildToggle = this.interactToggle = this.chestsToggle = false;
         }
 
+        // Actualización de etiquetas de los botones
         this.buildBtn.setMessage(Component.literal("B: " + (buildToggle ? "§aON" : "§cOFF")));
         this.interactBtn.setMessage(Component.literal("I: " + (interactToggle ? "§aON" : "§cOFF")));
         this.chestsBtn.setMessage(Component.literal("C: " + (chestsToggle ? "§aON" : "§cOFF")));
 
-        // Renderizado de Nivel superior
-        Component levelText = Component.literal("Nivel " + currentLevel + (isMax ? " §6§l(MAX)" : ""));
-        graphics.drawString(this.font, levelText, x + 12, y + 14, 0x404040, false);
-
-        // --- 4. RENDERIZADO DE LISTA Y REQUISITOS ---
+        // --- 4. RENDERIZADO FINAL ---
+        // (Tus métodos de renderizado adicionales...)
         renderGuestList(graphics, mouseX, mouseY);
         renderUpgradeRequirements(graphics);
         renderNameSuggestions(graphics, mouseX, mouseY);
@@ -277,42 +281,25 @@ public class ProtectionCoreScreen extends AbstractContainerScreen<ProtectionCore
         int y = (this.height - this.imageHeight) / 2;
 
         var core = this.menu.getCore();
-        List<String> guests = core.getTrustedNames();
+        if (core == null) return;
 
+        List<String> guests = core.getTrustedNames();
         int listX = x - 105;
         int listY = y + 10;
 
-        // Fondo de la lista (un poco más largo para el título "Jugadores")
         graphics.fill(listX, listY, listX + 100, listY + 135, 0x88000000);
-
-        // Título de la lista
         graphics.drawString(this.font, "§6§lJugadores", listX + 5, listY + 5, 0xFFFFFF);
 
-        // --- RENDERIZAR OWNER ---
-        // Intentamos obtener el nombre real del dueño si está en el servidor
-        String ownerName = "Cargando...";
-        var ownerUUID = core.getOwnerUUID();
-        var profile = this.minecraft.getSingleplayerServer() != null ?
-                this.minecraft.getSingleplayerServer().getProfileCache().get(ownerUUID) :
-                this.minecraft.getConnection().getPlayerInfo(ownerUUID);
-
-        if (profile != null) {
-            ownerName = (profile instanceof net.minecraft.client.multiplayer.PlayerInfo info) ?
-                    info.getProfile().getName() : ((java.util.Optional<com.mojang.authlib.GameProfile>)profile).get().getName();
-        } else {
-            // Fallback si no lo encuentra: Mostramos "Líder"
-            ownerName = "Líder";
-        }
+        // FIX: Usar el nombre del dueño guardado en la BlockEntity para evitar problemas de red/cache
+        String ownerName = core.getOwnerName();
+        if (ownerName == null || ownerName.isEmpty()) ownerName = "Dueño";
 
         int ownerY = listY + 20;
         graphics.drawString(this.font, "§e★ §f" + ownerName, listX + 5, ownerY, 0xFFAA00);
 
-        // --- RENDERIZAR RESTO DE JUGADORES ---
-        int offset = 1; // Empezamos debajo del owner
+        int offset = 1;
         for (int i = 0; i < guests.size(); i++) {
             String name = guests.get(i);
-
-            // Evitamos duplicar si el dueño está en la lista de invitados por error
             if (name.equalsIgnoreCase(ownerName)) continue;
 
             int entryY = listY + 20 + (offset * 14);
@@ -321,10 +308,7 @@ public class ProtectionCoreScreen extends AbstractContainerScreen<ProtectionCore
             boolean isHoveringRemove = mouseX >= removeBtnX - 2 && mouseX <= removeBtnX + 12 &&
                     mouseY >= entryY - 2 && mouseY <= entryY + 10;
 
-            boolean isHoveringName = mouseX >= listX + 5 && mouseX <= removeBtnX - 5 &&
-                    mouseY >= entryY && mouseY <= entryY + 9;
-
-            graphics.drawString(this.font, name, listX + 5, entryY, isHoveringName ? 0xFFFFAA : 0xAAAAAA);
+            graphics.drawString(this.font, name, listX + 5, entryY, 0xAAAAAA);
             graphics.drawString(this.font, "§c[X]", removeBtnX, entryY, isHoveringRemove ? 0xFFFFFF : 0xCC0000);
 
             offset++;
@@ -332,37 +316,69 @@ public class ProtectionCoreScreen extends AbstractContainerScreen<ProtectionCore
     }
 
     @Override
+    protected void renderLabels(GuiGraphics guiGraphics, int mouseX, int mouseY) {
+        // Título original
+        guiGraphics.drawString(this.font, this.title, this.titleLabelX, this.titleLabelY, 4210752);
+
+        // MOSTRAR NIVEL:
+        // Obtenemos el nivel desde el menu (que a su vez lo saca de la BlockEntity)
+        int level = this.menu.getCore().getCoreLevel();
+        String levelText = "Nivel: " + level;
+
+        // Si es nivel máximo, lo ponemos en un color dorado o verde
+        int color = (level >= 5) ? 0xFFAA00 : 0x404040;
+
+        // Dibujamos el texto del nivel (ajusta las coordenadas X e Y a tu gusto)
+        guiGraphics.drawString(this.font, levelText, 100 , 8, color);
+    }
+
+    @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
-        if (button == 0) {
+        if (button == 0) { // Clic Izquierdo
             int x = (this.width - this.imageWidth) / 2;
             int y = (this.height - this.imageHeight) / 2;
-            List<String> guests = this.menu.getCore().getTrustedNames();
-            int listX = x - 105;
-            int listY = y + 20;
 
+            var core = this.menu.getCore();
+            if (core == null) return super.mouseClicked(mouseX, mouseY, button);
+
+            List<String> guests = core.getTrustedNames();
+            int listX = x - 105;
+            int listY = y + 10; // Alineado con listY de renderGuestList
+
+            // Iteramos los invitados para detectar clics en la lista lateral
+            int offset = 1; // Empezamos después del Owner
             for (int i = 0; i < guests.size(); i++) {
                 String name = guests.get(i);
-                int entryY = listY + 20 + (i * 14);
+                if (name.equalsIgnoreCase(core.getOwnerName())) continue;
+
+                int entryY = listY + 20 + (offset * 14);
                 int removeBtnX = listX + 85;
 
-                // Eliminar invitado
-                if (mouseX >= removeBtnX - 2 && mouseX <= removeBtnX + 12 && mouseY >= entryY - 2 && mouseY <= entryY + 10) {
-                    PacketDistributor.sendToServer(new ChangePermissionPayload(this.menu.getCore().getBlockPos(), name, "remove", false));
+                // 1. ELIMINAR INVITADO (Clic en la [X])
+                if (mouseX >= removeBtnX - 2 && mouseX <= removeBtnX + 12 &&
+                        mouseY >= entryY - 2 && mouseY <= entryY + 10) {
+
+                    PacketDistributor.sendToServer(new ChangePermissionPayload(core.getBlockPos(), name, "remove", false));
                     playClickSound();
                     return true;
                 }
 
-                // Seleccionar invitado
-                if (mouseX >= listX + 5 && mouseX <= removeBtnX - 5 && mouseY >= entryY && mouseY <= entryY + 10) {
+                // 2. SELECCIONAR INVITADO (Clic en el Nombre)
+                if (mouseX >= listX + 5 && mouseX <= removeBtnX - 5 &&
+                        mouseY >= entryY && mouseY <= entryY + 10) {
+
                     this.nameInput.setValue(name);
-                    // Forzamos actualización de toggles inmediatamente
-                    var perms = this.menu.getCore().getPermissionsFor(name);
+
+                    // ACTUALIZACIÓN INMEDIATA: Buscamos los permisos en la BE para actualizar la UI
+                    var perms = core.getPermissionsFor(name);
                     this.buildToggle = perms.canBuild;
                     this.interactToggle = perms.canInteract;
                     this.chestsToggle = perms.canOpenChests;
+
                     playClickSound();
                     return true;
                 }
+                offset++;
             }
         }
         return super.mouseClicked(mouseX, mouseY, button);

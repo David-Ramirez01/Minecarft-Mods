@@ -4,14 +4,21 @@ import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
+import com.tumod.protectormod.blockentity.AdminProtectorBlockEntity;
 import com.tumod.protectormod.blockentity.ProtectionCoreBlockEntity;
 import com.tumod.protectormod.util.ClanSavedData;
 import com.tumod.protectormod.util.InviteManager;
+import com.tumod.protectormod.util.ProtectionDataManager;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
+import net.minecraft.commands.arguments.EntityArgument;
+import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.Set;
@@ -39,6 +46,47 @@ public class ClanCommands {
                                 })
                         )
                 )
+                // Dentro de tu registro en ClanCommands.java
+                .then(Commands.literal("admin")
+                        .requires(s -> s.hasPermission(2))
+                        .then(Commands.literal("trust")
+                                .then(Commands.argument("player", EntityArgument.player())
+                                        .executes(context -> {
+                                            ServerPlayer target = EntityArgument.getPlayer(context, "player");
+                                            ServerPlayer admin = context.getSource().getPlayerOrException();
+                                            BlockHitResult hit = (BlockHitResult) admin.pick(5.0D, 0.0F, false);
+                                            BlockPos pos = hit.getBlockPos();
+
+                                            if (admin.level().getBlockEntity(pos) instanceof AdminProtectorBlockEntity adminCore) {
+                                                adminCore.updatePermission(target.getUUID(), target.getName().getString(), "build", true);
+                                                adminCore.markDirtyAndUpdate(); // <--- IMPORTANTE para persistencia
+                                                admin.sendSystemMessage(Component.literal("§d[Admin] §b" + target.getName().getString() + " §afue añadido."));
+                                                return 1;
+                                            }
+                                            admin.sendSystemMessage(Component.literal("§c[!] Debes mirar un núcleo de admin."));
+                                            return 0;
+                                        })
+                                )
+                        )
+                        .then(Commands.literal("untrust") // <--- NUEVO: Para quitar permisos
+                                .then(Commands.argument("player", EntityArgument.player())
+                                        .executes(context -> {
+                                            ServerPlayer target = EntityArgument.getPlayer(context, "player");
+                                            ServerPlayer admin = context.getSource().getPlayerOrException();
+                                            BlockHitResult hit = (BlockHitResult) admin.pick(5.0D, 0.0F, false);
+                                            BlockPos pos = hit.getBlockPos();
+
+                                            if (admin.level().getBlockEntity(pos) instanceof AdminProtectorBlockEntity adminCore) {
+                                                adminCore.removePlayerPermissions(target.getName().getString());
+                                                adminCore.markDirtyAndUpdate();
+                                                admin.sendSystemMessage(Component.literal("§d[Admin] §b" + target.getName().getString() + " §cremovido."));
+                                                return 1;
+                                            }
+                                            return 0;
+                                        })
+                                )
+                        )
+                )
                 .then(Commands.literal("help").executes(context -> showProtectorHelp(context.getSource())))
                 .then(Commands.literal("visualizer")
                         .requires(s -> s.hasPermission(2))
@@ -54,18 +102,20 @@ public class ClanCommands {
                             return 1;
                         })
                 )
-                .then(Commands.literal("limit")
-                        .requires(s -> s.hasPermission(2))
-                        .then(Commands.argument("cantidad", IntegerArgumentType.integer(1, 100))
-                                .executes(c -> {
-                                    int nuevaCant = IntegerArgumentType.getInteger(c, "cantidad");
-                                    ClanSavedData data = ClanSavedData.get(c.getSource().getLevel());
-                                    data.serverMaxCores = nuevaCant;
-                                    data.setDirty();
-                                    c.getSource().sendSuccess(() -> Component.literal("§aLímite global de cores actualizado a: §f" + nuevaCant), true);
-                                    return 1;
-                                }))
-                )
+                        .then(Commands.literal("limit")
+                                .requires(s -> s.hasPermission(2)) // Solo Admins
+                                .then(Commands.argument("cantidad", IntegerArgumentType.integer(1, 100))
+                                        .executes(c -> {
+                                            int nuevaCant = IntegerArgumentType.getInteger(c, "cantidad");
+                                            ServerLevel level = c.getSource().getLevel();
+                                            ClanSavedData data = ClanSavedData.get(level);
+
+                                            data.setServerMaxCores(nuevaCant); // Usa un setter que marque setDirty()
+
+                                            c.getSource().sendSuccess(() -> Component.literal("§6[Protector] §aLímite global actualizado a: §f" + nuevaCant), true);
+                                            return 1;
+                                        }))
+                        )
                 .then(Commands.literal("list")
                         .requires(s -> s.hasPermission(2))
                         .executes(context -> executeList(context.getSource())))
@@ -180,31 +230,36 @@ public class ClanCommands {
         InviteManager.PendingInvite invite = InviteManager.getInvite(player.getUUID());
 
         if (invite != null) {
-            ClanSavedData data = ClanSavedData.get(player.serverLevel());
+            ServerLevel level = player.serverLevel();
+
+            // 1. Intentar unión al Clan (Si el dueño tiene uno)
+            ClanSavedData data = ClanSavedData.get(level);
             ClanSavedData.ClanInstance clan = data.getClanByLeader(invite.requesterUUID());
-
             if (clan != null) {
-                // VALIDACIÓN DE LÍMITE
-                if (clan.members.size() >= clan.maxMembers) {
-                    player.sendSystemMessage(Component.literal("§c[!] El clan está lleno. Límite: " + clan.maxMembers));
-                    return 0;
+                if (clan.members.size() < clan.maxMembers) {
+                    clan.members.add(player.getUUID());
+                    data.setDirty();
+                    player.sendSystemMessage(Component.literal("§a✔ Te has unido al clan: §b" + clan.name));
                 }
+            }
 
-                // UNIÓN OFICIAL AL CLAN
-                clan.members.add(player.getUUID());
-                data.setDirty();
+            // 2. VITAL: Añadir permisos directamente al Bloque (Core)
+            if (level.getBlockEntity(invite.corePos()) instanceof ProtectionCoreBlockEntity core) {
+                // Le damos permiso de construcción y cofres por defecto al aceptar
+                core.updatePermission(player.getUUID(), player.getName().getString(), "build", true);
+                core.updatePermission(player.getUUID(), player.getName().getString(), "chests", true);
+                core.markDirtyAndUpdate();
 
-                // PERMISOS EN EL CORE
-                if (player.level().getBlockEntity(invite.corePos()) instanceof ProtectionCoreBlockEntity core) {
-                    core.updatePermission(player.getName().getString(), "build", true);
-                    core.markDirtyAndUpdate();
-                }
-
-                player.sendSystemMessage(Component.literal("§a✔ Te has unido al clan: §b" + clan.name));
+                player.sendSystemMessage(Component.literal("§a✔ Ahora tienes acceso al núcleo de §b" + core.getOwnerName()));
                 InviteManager.removeInvite(player.getUUID());
                 return 1;
+            } else {
+                player.sendSystemMessage(Component.literal("§c[!] El núcleo ya no existe o no se pudo encontrar."));
+                InviteManager.removeInvite(player.getUUID());
+                return 0;
             }
         }
+
         player.sendSystemMessage(Component.literal("§c[!] No tienes invitaciones pendientes."));
         return 0;
     }
@@ -229,6 +284,7 @@ public class ClanCommands {
             source.sendSuccess(() -> Component.literal("§d§lMODO ADMINISTRADOR:"), false);
             source.sendSuccess(() -> Component.literal("§b/protector debug §7- Info técnica del core."), false);
             source.sendSuccess(() -> Component.literal("§b/protector visualizer §7- Bordes de partículas."), false);
+            source.sendSuccess(() -> Component.literal("§b/protector admin trust/untrust §7- Permitir / Remover de un admin core"), false);
             source.sendSuccess(() -> Component.literal("§b/protector list §7- Lista todos los núcleos."), false);
             source.sendSuccess(() -> Component.literal("§b/protector limit <n> §7- Límite global de cores."), false);
         }
@@ -262,14 +318,48 @@ public class ClanCommands {
     }
 
     private static int executeList(CommandSourceStack source) {
-        var cores = ProtectionCoreBlockEntity.getLoadedCores();
+        ServerLevel level = source.getLevel();
+        ProtectionDataManager manager = ProtectionDataManager.get(level);
+        ClanSavedData clanData = ClanSavedData.get(level); // Obtenemos datos de clanes
+        var cores = manager.getAllCores();
+
         if (cores.isEmpty()) {
             source.sendSuccess(() -> Component.literal("§cNo hay núcleos activos."), false);
             return 0;
         }
+
         source.sendSuccess(() -> Component.literal("§6§lAUDITORÍA DE NÚCLEOS:"), false);
-        for (ProtectionCoreBlockEntity core : cores) {
-            source.sendSuccess(() -> Component.literal("§e- §fPos: §b" + core.getBlockPos().toShortString() + " §8| §e" + core.getClanName()), false);
+
+        for (var entry : cores.entrySet()) {
+            BlockPos pos = entry.getKey();
+            UUID ownerUUID = entry.getValue().owner();
+
+            // 1. Obtener el nombre del jugador (si está online o desde el cache del servidor)
+            String ownerName = "Desconocido";
+            if (ownerUUID != null) {
+                var player = level.getServer().getPlayerList().getPlayer(ownerUUID);
+                if (player != null) {
+                    ownerName = player.getName().getString();
+                } else {
+                    // Si el jugador está offline, intentamos buscar el nombre en la BE o el cache
+                    // Por ahora, si no lo encuentra, mostramos "Offline/UUID" o "Sistema"
+                    ownerName = ownerUUID.toString().substring(0, 8) + "...";
+                }
+            } else {
+                ownerName = "§dADMIN";
+            }
+
+            // 2. Obtener el nombre del clan
+            String clanSuffix = "";
+            var clan = clanData.getClanByMember(ownerUUID);
+            if (clan != null) {
+                clanSuffix = " §8[§b" + clan.name + "§8]";
+            }
+
+            String finalName = ownerName;
+            String finalClan = clanSuffix;
+            source.sendSuccess(() -> Component.literal("§e- §fPos: §b" + pos.toShortString() +
+                    " §8| §eOwner: §7" + finalName + finalClan), false);
         }
         return cores.size();
     }

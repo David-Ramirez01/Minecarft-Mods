@@ -13,26 +13,43 @@ import net.minecraft.world.inventory.MenuType;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.neoforged.neoforge.items.SlotItemHandler;
 
 public class ProtectionCoreMenu extends AbstractContainerMenu {
-    private final ProtectionCoreBlockEntity core; // Usaremos solo 'core' para evitar confusiones
+    private final ProtectionCoreBlockEntity core;
     private final ContainerLevelAccess access;
 
-    // 🔹 CONSTRUCTOR PARA EL SERVIDOR
     public ProtectionCoreMenu(MenuType<?> type, int id, Inventory playerInv, ProtectionCoreBlockEntity core) {
         super(type, id);
         this.core = core;
         this.access = ContainerLevelAccess.create(core.getLevel(), core.getBlockPos());
 
-        boolean isAdminCore = core.getBlockState().is(ModBlocks.ADMIN_PROTECTOR.get());
+        this.addDataSlot(new net.minecraft.world.inventory.DataSlot() {
+            @Override
+            public int get() {
+                return core.getCoreLevel();
+            }
+
+            @Override
+            public void set(int value) {
+                // Actualizamos la variable en el lado del cliente
+                core.setCoreLevelClient(value);
+            }
+        });
+
+        boolean isAdminCore = core.isAdmin(); // Usamos el método que creamos en la BE
 
         if (!isAdminCore) {
-            // --- NÚCLEO NORMAL: Slots en su posición original ---
-            this.addSlot(new Slot(core.getInventory(), 0, 15, 105) {
-                @Override public boolean mayPlace(ItemStack stack) { return stack.is(ModItems.PROTECTION_UPGRADE.get()); }
+            this.addSlot(new SlotItemHandler(core.getInventory(), 0, 15, 105) {
+                @Override
+                public boolean mayPlace(ItemStack stack) {
+                    return stack.is(ModItems.PROTECTION_UPGRADE.get());
+                }
             });
-            this.addSlot(new Slot(core.getInventory(), 1, 35, 105) {
-                @Override public boolean mayPlace(ItemStack stack) {
+
+            this.addSlot(new SlotItemHandler(core.getInventory(), 1, 35, 105) {
+                @Override
+                public boolean mayPlace(ItemStack stack) {
                     return switch (core.getCoreLevel()) {
                         case 1 -> stack.is(Items.IRON_INGOT);
                         case 2 -> stack.is(Items.GOLD_INGOT);
@@ -42,11 +59,10 @@ public class ProtectionCoreMenu extends AbstractContainerMenu {
                     };
                 }
             });
-            // Inventario del jugador en posición estándar (abajo)
+
             addPlayerInventory(playerInv, 8, 140);
             addPlayerHotbar(playerInv, 8, 198);
         } else {
-            // --- ADMIN CORE ---
             addPlayerInventory(playerInv, 8, 140);
             addPlayerHotbar(playerInv, 8, 198);
         }
@@ -142,20 +158,4 @@ public class ProtectionCoreMenu extends AbstractContainerMenu {
         }
         return result;
     }
-
-    private void addPlayerInventory(Inventory inv) {
-        for (int row = 0; row < 3; ++row) {
-            for (int col = 0; col < 9; ++col) {
-                this.addSlot(new Slot(inv, col + row * 9 + 9, 8 + col * 18, 140 + row * 18));
-            }
-        }
-    }
-
-    private void addPlayerHotbar(Inventory inv) {
-        for (int col = 0; col < 9; ++col) {
-            this.addSlot(new Slot(inv, col, 8 + col * 18, 198));
-        }
-    }
 }
-
-

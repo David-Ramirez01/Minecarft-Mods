@@ -19,6 +19,7 @@ public class AdminCoreScreen extends AbstractContainerScreen<ProtectionCoreMenu>
 
     private EditBox radiusInput;
     private final ProtectionCoreBlockEntity core;
+    private boolean tempCanBuild;
 
     public AdminCoreScreen(ProtectionCoreMenu menu, Inventory inventory, Component title) {
         super(menu, inventory, title);
@@ -30,6 +31,7 @@ public class AdminCoreScreen extends AbstractContainerScreen<ProtectionCoreMenu>
     @Override
     protected void init() {
         super.init();
+        this.tempCanBuild = core.getFlag("break");
         // 🔹 TRUCO: Enviamos las etiquetas automáticas fuera de la pantalla
         this.titleLabelY = -1000;
         this.inventoryLabelY = - 94;
@@ -43,6 +45,12 @@ public class AdminCoreScreen extends AbstractContainerScreen<ProtectionCoreMenu>
         this.addRenderableWidget(this.radiusInput);
 
         this.addRenderableWidget(Button.builder(Component.literal("🚩 CONFIGURAR FLAGS"), b -> {
+            // 🔹 IMPORTANTE: Guardamos lo que el usuario escribió antes de saltar a la otra pantalla
+            try {
+                int r = Integer.parseInt(radiusInput.getValue());
+                core.setAdminRadius(r); // Actualizamos la variable local del cliente
+            } catch (NumberFormatException ignored) {}
+
             this.minecraft.setScreen(new FlagsScreen(this, core));
         }).bounds(x + 20, y + 55, 136, 20).build());
 
@@ -54,15 +62,19 @@ public class AdminCoreScreen extends AbstractContainerScreen<ProtectionCoreMenu>
     private void applyChanges() {
         try {
             int newRadius = Integer.parseInt(radiusInput.getValue());
+
+            // Enviamos el paquete SOLO con el nuevo radio.
             PacketDistributor.sendToServer(new UpdateAdminCorePayload(
                     core.getBlockPos(),
                     newRadius,
-                    core.getFlag("pvp"),
-                    !core.getFlag("explosions")
+                    core.getFlag("pvp"),        // Mantenemos lo que ya tiene el core
+                    core.getFlag("explosions"), // Mantenemos lo que ya tiene el core
+                    core.getFlag("build")       // Mantenemos lo que ya tiene el core
             ));
-            this.minecraft.player.displayClientMessage(Component.literal("§aÁrea de administración actualizada."), true);
+
+            this.onClose();
         } catch (NumberFormatException e) {
-            radiusInput.setValue("128");
+            radiusInput.setValue(String.valueOf(core.getRadius()));
         }
     }
 
@@ -89,5 +101,4 @@ public class AdminCoreScreen extends AbstractContainerScreen<ProtectionCoreMenu>
         // Renderiza el fondo del cofre doble
         graphics.blit(TEXTURE, x, y, 0, 0, this.imageWidth, this.imageHeight);
     }
-
 }

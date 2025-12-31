@@ -4,6 +4,7 @@ import com.tumod.protectormod.block.ProtectionCoreBlock;
 import com.tumod.protectormod.menu.ProtectionCoreMenu;
 import com.tumod.protectormod.registry.*;
 import com.tumod.protectormod.util.ClanSavedData;
+import com.tumod.protectormod.util.ProtectionDataManager;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.core.particles.ParticleTypes;
@@ -16,48 +17,65 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.MenuProvider;
-import net.minecraft.world.SimpleContainer;
-import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.Items;
-import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
-import org.jetbrains.annotations.Nullable;
+import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
+import net.neoforged.neoforge.items.ItemStackHandler;
+
 
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 
 public class ProtectionCoreBlockEntity extends BlockEntity implements MenuProvider {
 
-    // Registro estático para acceso desde Comandos/Eventos
-    private static final Set<ProtectionCoreBlockEntity> LOADED_CORES = ConcurrentHashMap.newKeySet();
-
     private int coreLevel = 1;
-    protected int adminRadius = 128;
+    private int range = 10;
+    public int adminRadius = 128;
     private UUID ownerUUID;
-    private String clanName = "";
+    protected String clanName = "";
     private String ownerName = "Protector";
 
     private final Map<String, Boolean> flags = new HashMap<>();
-    private final Map<String, PlayerPermissions> permissionsMap = new HashMap<>();
 
-    private final SimpleContainer inventory = new SimpleContainer(2) {
+
+
+    // MEJORA: Ahora usamos UUID como clave primaria y un cache para nombres
+    protected final Map<UUID, PlayerPermissions> permissionsMap = new HashMap<>();
+    private final Map<UUID, String> nameCache = new HashMap<>();
+
+    private final ItemStackHandler inventory = new ItemStackHandler(2) {
         @Override
-        public void setChanged() {
-            super.setChanged();
+        protected void onContentsChanged(int slot) {
+            // En NeoForge, usamos este método en lugar de setChanged()
+            ProtectionCoreBlockEntity.this.setChanged();
             ProtectionCoreBlockEntity.this.markDirtyAndUpdate();
         }
     };
 
+    public void initializeDefaultFlags() {
+        this.flags.clear();
+        for (String f : getAllFlagKeys()) {
+            // Permitir entrar y hambre por defecto, el resto protegido
+            if (f.equals("entry") || f.equals("hunger") || f.equals("fire-spread")) {
+                flags.put(f, true);
+            } else {
+                flags.put(f, false);
+            }
+        }
+    }
 
-
-    // --- CONSTRUCTORES ---
-
+    public List<String> getAllFlagKeys() {
+        return List.of("pvp", "explosions", "break", "build", "interact", "chests",
+                "mob-spawn", "mob-grief", "fire-spread", "fire-damage",
+                "use-buckets", "item-pickup", "item-drop", "crop-trample",
+                "lighter", "damage-animals", "villager-trade", "entry",
+                "enderpearl", "fall-damage", "hunger");
+    }
     public ProtectionCoreBlockEntity(BlockPos pos, BlockState state) {
         this(ModBlockEntities.PROTECTION_CORE_BE.get(), pos, state);
     }
@@ -67,86 +85,102 @@ public class ProtectionCoreBlockEntity extends BlockEntity implements MenuProvid
         initializeDefaultFlags();
     }
 
-    // --- LÓGICA DE CARGA Y REGISTRO ---
-
-    public static Set<ProtectionCoreBlockEntity> getLoadedCores() {
-        return LOADED_CORES;
-    }
+    // --- INTEGRACIÓN CON MANAGER (REEMPLAZA LOADED_CORES) ---
 
     @Override
     public void onLoad() {
         super.onLoad();
-        if (this.level != null && !this.level.isClientSide) {
-            // Forzamos que se registre si es la parte inferior
+        if (this.level instanceof ServerLevel serverLevel) {
             if (this.getBlockState().getValue(ProtectionCoreBlock.HALF) == net.minecraft.world.level.block.state.properties.DoubleBlockHalf.LOWER) {
-
-                // Usamos una copia para evitar errores de modificación concurrente
-                LOADED_CORES.removeIf(c -> c.getBlockPos().equals(this.worldPosition));
-                LOADED_CORES.add(this);
-
-                // DEBUG: Descomenta esto para ver en consola si el Admin Core se registra
-                // if(isAdmin()) System.out.println("Admin Core registrado en: " + this.worldPosition);
+                ProtectionDataManager data = ProtectionDataManager.get(serverLevel);
+                data.addCore(this.worldPosition, getOwnerUUID(), getRadius());
+                data.syncToAll(serverLevel); // <--- NUEVO: Sincroniza con clientes
             }
         }
     }
 
-
-
-    @Override
-    public void onChunkUnloaded() {
-        super.onChunkUnloaded();
-        LOADED_CORES.remove(this);
-    }
-
     @Override
     public void setRemoved() {
+        if (this.level instanceof ServerLevel serverLevel) {
+            ProtectionDataManager data = ProtectionDataManager.get(serverLevel);
+            data.removeCore(this.worldPosition);
+            data.syncToAll(serverLevel); // <--- NUEVO: Sincroniza con clientes
+        }
         super.setRemoved();
-        LOADED_CORES.remove(this);
+    }
+
+    public void setRadius(int newRadius) {
+        if (isAdmin()) {
+            this.adminRadius = newRadius;
+        } else {
+            this.range = newRadius;
+        }
+        this.markDirtyAndUpdate();
+    }
+
+    // Añadir a ProtectionCoreBlockEntity.java
+
+    public ItemStackHandler getInventory() {
+        return this.inventory;
     }
 
     public boolean isInside(BlockPos targetPos) {
-        int r = getRadius();
-        return Math.abs(targetPos.getX() - this.worldPosition.getX()) <= r &&
-                Math.abs(targetPos.getZ() - this.worldPosition.getZ()) <= r;
+        return this.worldPosition.distSqr(targetPos) <= (double) (this.range * this.range);
     }
 
-    public boolean areaOverlaps(BlockPos otherPos, int otherRadius) {
-        int thisRadius = this.getRadius();
-        // Calculamos la distancia en los 3 ejes
-        int dx = Math.abs(this.worldPosition.getX() - otherPos.getX());
-        int dz = Math.abs(this.worldPosition.getZ() - otherPos.getZ());
-
-        // Si la distancia entre centros es menor a la suma de los radios, hay superposición
-        return dx < (thisRadius + otherRadius) &&
-                dz < (thisRadius + otherRadius);
+    public int getCoreLevel() {
+        return this.coreLevel;
     }
+
+    public String getClanName() {
+        // Si no usas clanes aún, devuelve un String vacío o el campo que tengas
+        return this.clanName != null ? this.clanName : "";
+    }
+
+    public void setClanName(String name) {
+        this.clanName = name;
+        this.markDirtyAndUpdate();
+    }
+
+    public void setCoreLevelClient(int level) {
+        this.coreLevel = level;
+    }
+
+
+    // --- LÓGICA DE PERMISOS (REFACTORIZADA A UUID) ---
 
     public boolean isTrusted(Player player) {
-        // El dueño y los administradores siempre son de confianza
-        if (player.getUUID().equals(this.getOwnerUUID()) || player.hasPermissions(2)) {
-            return true;
+        // 1. Dueño o Admin (Prioridad máxima)
+        if (player.getUUID().equals(this.getOwnerUUID()) || player.hasPermissions(2)) return true;
+
+        // 2. Lógica de Clan
+        if (this.level instanceof ServerLevel serverLevel) {
+            var clanData = ClanSavedData.get(serverLevel);
+            // Obtenemos la instancia del clan del jugador
+            var playerClanInstance = clanData.getClanByMember(player.getUUID());
+
+            // Verificamos si existe el clan Y si el nombre coincide con el del núcleo
+            if (playerClanInstance != null) {
+                // Prueba con .name si .getName() falla
+                String clanNameStr = playerClanInstance.name;
+
+                if (clanNameStr != null && clanNameStr.equalsIgnoreCase(this.clanName)) {
+                    return true;
+                }
+            }
         }
 
-        // Verificamos si el nombre del jugador está en el mapa de permisos con "build" activo
-        PlayerPermissions perms = this.permissionsMap.get(player.getName().getString());
+        // 3. Invitados manuales
+        PlayerPermissions perms = this.permissionsMap.get(player.getUUID());
         return perms != null && perms.canBuild;
     }
 
-    public List<String> getTrustedNames() {
-        return new ArrayList<>(this.permissionsMap.keySet());
-    }
-
     public boolean hasPermission(Player player, String type) {
-        // 1. El dueño y los administradores de Minecraft (OP) siempre tienen permiso
-        if (player.getUUID().equals(ownerUUID) || player.hasPermissions(2)) {
-            return true;
-        }
+        if (player.getUUID().equals(ownerUUID) || player.hasPermissions(2)) return true;
 
-        // 2. Buscamos al jugador en el mapa de invitados por su nombre
-        PlayerPermissions perms = permissionsMap.get(player.getName().getString());
+        PlayerPermissions perms = permissionsMap.get(player.getUUID());
         if (perms == null) return false;
 
-        // 3. Verificamos el tipo de permiso solicitado
         return switch (type.toLowerCase()) {
             case "build" -> perms.canBuild;
             case "interact" -> perms.canInteract;
@@ -155,31 +189,10 @@ public class ProtectionCoreBlockEntity extends BlockEntity implements MenuProvid
         };
     }
 
-    public static void cleanInvalidCores() {
-        LOADED_CORES.removeIf(core ->
-                core.isRemoved() ||
-                        core.getLevel() == null ||
-                        core.getLevel().getBlockEntity(core.getBlockPos()) != core
-        );
-    }
+    public void updatePermission(UUID playerUUID, String playerName, String type, boolean value) {
+        PlayerPermissions perms = permissionsMap.computeIfAbsent(playerUUID, k -> new PlayerPermissions());
+        nameCache.put(playerUUID, playerName); // Actualizamos el cache de nombres
 
-    // --- GESTIÓN DE CLANES Y PERMISOS ---
-
-    public void clearTrustedPlayers() {
-        this.permissionsMap.clear();
-        this.markDirtyAndUpdate();
-    }
-
-    public void resetToDefault() {
-        this.permissionsMap.clear();
-        this.clanName = "";
-        this.coreLevel = 1;
-        initializeDefaultFlags();
-        this.markDirtyAndUpdate();
-    }
-
-    public void updatePermission(String playerName, String type, boolean value) {
-        PlayerPermissions perms = permissionsMap.computeIfAbsent(playerName, k -> new PlayerPermissions());
         switch (type) {
             case "build" -> perms.canBuild = value;
             case "interact" -> perms.canInteract = value;
@@ -188,274 +201,170 @@ public class ProtectionCoreBlockEntity extends BlockEntity implements MenuProvid
         markDirtyAndUpdate();
     }
 
-    public PlayerPermissions getPermissionsFor(String name) {
-        return permissionsMap.getOrDefault(name, new PlayerPermissions());
+    public List<String> getTrustedNames() {
+        return new ArrayList<>(nameCache.values());
     }
 
     // --- MEJORAS Y RADIOS ---
 
     public void upgrade(ServerPlayer player) {
-        // 1. Determinar el radio del siguiente nivel
         int siguienteNivel = this.coreLevel + 1;
         if (siguienteNivel > 5) return;
 
         int radioFuturo = obtenerRadioPorNivel(siguienteNivel);
 
-        // 2. VALIDACIÓN DE SUPERPOSICIÓN
-        if (!esAdminCore()) {
-            if (!puedeExpandirseA(radioFuturo)) {
-                player.displayClientMessage(Component.literal("§c[!] No hay espacio suficiente. El radio choca con otra zona."), true);
-                player.playSound(SoundEvents.VILLAGER_NO, 1.0F, 1.0F);
+        if (this.level instanceof ServerLevel sLevel) {
+            // 1. VALIDACIÓN DE SOLAPAMIENTO
+            if (!isAdmin()) {
+                boolean overlaps = ProtectionDataManager.get(sLevel).getAllCores().entrySet().stream()
+                        .filter(entry -> !entry.getKey().equals(this.worldPosition))
+                        .anyMatch(entry -> {
+                            double dist = Math.sqrt(this.worldPosition.distSqr(entry.getKey()));
+                            return dist < (radioFuturo + entry.getValue().radius());
+                        });
+
+                if (overlaps) {
+                    player.displayClientMessage(Component.literal("§c[!] No hay espacio. Choca con otra zona."), true);
+                    player.playSound(SoundEvents.VILLAGER_NO, 1.0F, 1.0F);
+                    return;
+                }
+            }
+
+            // 2. VALIDACIÓN DE MATERIALES
+            if (!canUpgrade()) {
+                player.displayClientMessage(Component.literal("§c[!] No tienes los materiales necesarios."), true);
                 return;
             }
+
+            // 3. CONSUMO DE ITEMS (CORREGIDO PARA ITEMSTACKHANDLER)
+            // Usamos extractItem(slot, amount, simulate)
+            this.inventory.extractItem(0, 1, false);
+            int cantidadAConsumir = (this.coreLevel == 1) ? 64 : 32;
+            this.inventory.extractItem(1, cantidadAConsumir, false);
+
+            // 4. ACTUALIZACIÓN DE NIVEL Y BLOQUES
+            this.coreLevel++;
+            this.range = radioFuturo; // Actualizamos la variable local de radio
+            actualizarEstadosBloque();
+
+            // 5. ACTUALIZACIÓN DE DATOS Y MANAGER
+            ProtectionDataManager manager = ProtectionDataManager.get(sLevel);
+            // Registramos el nuevo radio en el manager global
+            manager.addCore(this.worldPosition, getOwnerUUID(), this.range);
+            manager.syncToAll(sLevel);
+
+            // 6. EFECTOS Y PERSISTENCIA
+            efectosMejora();
+            this.markDirtyAndUpdate();
+
+            player.displayClientMessage(Component.literal("§a[!] ¡Núcleo mejorado al nivel " + this.coreLevel + "!"), true);
+            player.playSound(SoundEvents.PLAYER_LEVELUP, 1.0F, 1.2F);
         }
+    }
 
-        // 3. Validaciones de materiales
-        if (!canUpgrade()) {
-            player.displayClientMessage(Component.literal("§c[!] No tienes los materiales necesarios."), true);
-            return;
-        }
+    public PlayerPermissions getPermissionsFor(String playerName) {
+        // Buscamos el UUID en el cache de nombres que ya tienes
+        return permissionsMap.entrySet().stream()
+                .filter(entry -> nameCache.getOrDefault(entry.getKey(), "").equalsIgnoreCase(playerName))
+                .map(Map.Entry::getValue)
+                .findFirst()
+                .orElse(new PlayerPermissions()); // Si no existe, devuelve uno con todo en false
+    }
 
-        // 4. Procesar Mejora
-        int materialCount = (this.coreLevel == 1) ? 64 : 32;
-        this.inventory.removeItem(0, 1);
-        this.inventory.removeItem(1, materialCount);
+    // 1. Retorna los nombres de todos los que tienen algún permiso desde el cache de nombres
+    public List<String> getPlayersWithAnyPermission() {
+        return new ArrayList<>(this.nameCache.values());
+    }
 
-        // --- CAMBIO DE NIVEL Y ACTUALIZACIÓN DE BLOQUE ---
-        // --- CAMBIO DE NIVEL Y ACTUALIZACIÓN DE BLOQUE ---
-        this.coreLevel++;
+    // 2. Actualiza permisos buscando el UUID a través del cache o el servidor
+    public void updatePermission(String playerName, String permission, boolean value) {
+        // Buscamos el UUID en el cache de nombres
+        UUID targetUUID = nameCache.entrySet().stream()
+                .filter(e -> e.getValue().equalsIgnoreCase(playerName))
+                .map(Map.Entry::getKey)
+                .findFirst().orElse(null);
 
-        if (this.level != null) {
-            // ACTUALIZAR PARTE INFERIOR (Donde está esta BlockEntity)
-            BlockState currentState = this.level.getBlockState(this.worldPosition);
-            if (currentState.hasProperty(ProtectionCoreBlock.LEVEL)) {
-                BlockState newState = currentState.setValue(ProtectionCoreBlock.LEVEL, this.coreLevel);
-                this.level.setBlock(this.worldPosition, newState, 3);
-                this.level.sendBlockUpdated(this.worldPosition, currentState, newState, 3);
-            }
-
-            // ACTUALIZAR PARTE SUPERIOR (El bloque de arriba)
-            BlockPos upperPos = this.worldPosition.above();
-            BlockState upperState = this.level.getBlockState(upperPos);
-
-            // Verificamos que sea el mismo tipo de bloque antes de actualizarlo
-            if (upperState.is(currentState.getBlock()) && upperState.hasProperty(ProtectionCoreBlock.LEVEL)) {
-                BlockState newUpperState = upperState.setValue(ProtectionCoreBlock.LEVEL, this.coreLevel);
-                this.level.setBlock(upperPos, newUpperState, 3);
-                this.level.sendBlockUpdated(upperPos, upperState, newUpperState, 3);
-            }
-        }
-
-        // Dentro de upgrade() en la BlockEntity:
-        this.setChanged(); // Guarda en disco
-        if (this.level != null) {
-            this.level.sendBlockUpdated(this.worldPosition, getBlockState(), getBlockState(), 3); // Avisa al render
-        }
-
-        // 5. Efectos visuales y sonido
+        // Si el jugador está online, obtenemos su UUID real para mayor precisión
         if (this.level instanceof ServerLevel serverLevel) {
-            serverLevel.playSound(null, this.worldPosition, SoundEvents.PLAYER_LEVELUP, SoundSource.BLOCKS, 1.0F, 1.0F);
-            serverLevel.playSound(null, this.worldPosition, SoundEvents.TOTEM_USE, SoundSource.BLOCKS, 0.8F, 1.2F);
-
-            serverLevel.sendParticles(ParticleTypes.TOTEM_OF_UNDYING,
-                    this.worldPosition.getX() + 0.5,
-                    this.worldPosition.getY() + 1.0,
-                    this.worldPosition.getZ() + 0.5,
-                    30, 0.5, 0.5, 0.5, 0.15
-            );
-        }
-
-        player.displayClientMessage(Component.literal("§a[!] ¡Núcleo mejorado al nivel " + this.coreLevel + "!"), true);
-        this.markDirtyAndUpdate();
-    }
-
-    // Verifica si este núcleo es el de Admin
-    private boolean esAdminCore() {
-        return this.getBlockState().is(com.tumod.protectormod.registry.ModBlocks.ADMIN_PROTECTOR.get());
-    }
-
-    // Lógica matemática: ¿Choca mi radio futuro con el radio actual de otros?
-    public boolean puedeExpandirseA(int radioFuturo) {
-        for (var otherCore : getLoadedCores()) {
-            if (otherCore == this) continue;
-
-            // Calculamos la distancia entre centros
-            double distancia = Math.sqrt(this.worldPosition.distSqr(otherCore.getBlockPos()));
-            int radioOtro = otherCore.getRange();
-
-            // Si la distancia es menor a la suma de los radios, se están solapando
-            if (distancia < (radioFuturo + radioOtro)) {
-                return false;
+            ServerPlayer player = serverLevel.getServer().getPlayerList().getPlayerByName(playerName);
+            if (player != null) {
+                targetUUID = player.getUUID();
             }
         }
-        return true;
-    }
 
-    // Define cuánto crece el radio según el nivel (Ajusta los números a tu gusto)
-    private int obtenerRadioPorNivel(int nivel) {
-        return switch (nivel) {
-            case 1 -> 16;
-            case 2 -> 32;
-            case 3 -> 48;
-            case 4 -> 64;
-            case 5 -> 80;
-            default -> 16;
-        };
-    }
-
-    public static final List<String> BASIC_FLAGS = List.of(
-            "pvp", "build", "chests", "interact", "villager-trade", "fire-damage" // Añadido aquí
-    );
-
-    public static final List<String> ADMIN_FLAGS = List.of(
-            "explosions", "mob-spawn", "entry", "fall-damage", "fire-spread", "lighter", "item-pickup"
-    );
-
-    // En ProtectionCoreBlockEntity.java
-    public Set<String> getPlayersWithAnyPermission() {
-        // Si usas un Map<String, Map<String, Boolean>> para los permisos:
-        return this.permissionsMap.keySet();
-    }
-
-    public boolean canPlayerEditFlag(Player player, String flag) {
-        // 1. Si es un administrador de Minecraft (OP), puede editar TODO
-        if (player.hasPermissions(2)) return true;
-
-        // 2. Si el jugador es el dueño del core:
-        if (player.getUUID().equals(this.getOwnerUUID())) {
-            // Solo puede editar las flags básicas
-            return BASIC_FLAGS.contains(flag);
-        }
-
-        return false;
-    }
-
-
-    public boolean canUpgrade() {
-        if (isAdmin() || this.coreLevel >= 5) return false;
-
-        ItemStack upgradeItem = inventory.getItem(0);
-        ItemStack materialItem = inventory.getItem(1);
-
-        if (!upgradeItem.is(ModItems.PROTECTION_UPGRADE.get())) return false;
-
-        return switch (this.coreLevel) {
-            case 1 -> materialItem.is(Items.IRON_INGOT) && materialItem.getCount() >= 64;
-            case 2 -> materialItem.is(Items.GOLD_INGOT) && materialItem.getCount() >= 32;
-            case 3 -> materialItem.is(Items.DIAMOND) && materialItem.getCount() >= 32;
-            case 4 -> materialItem.is(Items.NETHERITE_INGOT) && materialItem.getCount() >= 32;
-            default -> false;
-        };
-    }
-
-    public int getRadius() {
-        if (isAdmin()) return this.adminRadius;
-        return obtenerRadioPorNivel(this.coreLevel);
-    }
-
-    public int getRange() {
-        return getRadius();
-    }
-
-    public int getAdminRadius() {
-        return this.adminRadius;
-    }
-
-    public boolean isAdmin() {
-        return this.getBlockState().is(ModBlocks.ADMIN_PROTECTOR.get());
-    }
-
-    // --- FLAGS ---
-
-    public void initializeDefaultFlags() {
-        this.flags.clear();
-        for (String f : getAllFlagKeys()) {
-            // FALSE = Bloqueado (Protegido)
-            // TRUE = Permitido (Libre)
-
-            if (f.equals("entry") || f.equals("hunger")) {
-                flags.put(f, true); // Permitir entrar y tener hambre por defecto
-            } else {
-                flags.put(f, false); // Todo lo demás bloqueado (PvP, Build, Explosiones)
-            }
+        if (targetUUID != null) {
+            // Usamos el método que ya tienes que acepta UUID
+            this.updatePermission(targetUUID, playerName, permission, value);
         }
     }
 
-
-
-    // --- MÉTODOS PARA EL MANEJADOR DE PAQUETES (NETWORKING) ---
-
-    /**
-     * Elimina a un jugador de la lista de invitados por su nombre.
-     */
+    // 3. Elimina a un jugador buscando su UUID por nombre
     public void removePlayerPermissions(String playerName) {
-        if (this.permissionsMap.containsKey(playerName)) {
-            this.permissionsMap.remove(playerName);
+        UUID targetUUID = nameCache.entrySet().stream()
+                .filter(e -> e.getValue().equalsIgnoreCase(playerName))
+                .map(Map.Entry::getKey)
+                .findFirst().orElse(null);
+
+        if (targetUUID != null) {
+            this.permissionsMap.remove(targetUUID);
+            this.nameCache.remove(targetUUID);
             this.markDirtyAndUpdate();
         }
     }
 
-    /**
-     * Cambia el radio masivo del Admin Core.
-     */
-    public void setAdminRadius(int newRadius) {
-        this.adminRadius = newRadius;
-        this.markDirtyAndUpdate();
+    // Para verificar si puede editar flags (Usado en handleUpdateFlag)
+    public boolean canPlayerEditFlag(Player player, String flagId) {
+        if (player.hasPermissions(2)) return true; // Admin
+        return player.getUUID().equals(this.getOwnerUUID()); // Solo el dueño
     }
 
-    /**
-     * Activa o desactiva el PvP en el área.
-     */
-    public void setPvpEnabled(boolean enabled) {
-        this.setFlag("pvp", enabled);
-        // El método setFlag ya llama a markDirtyAndUpdate()
+    private void actualizarEstadosBloque() {
+        if (this.level == null || this.level.isClientSide) return;
+
+        BlockState estadoBase = this.level.getBlockState(this.worldPosition);
+
+        // 1. Verificamos que sea nuestro bloque antes de cambiar nada
+        if (estadoBase.getBlock() instanceof ProtectionCoreBlock) {
+            // Actualizamos la parte inferior
+            BlockState nuevoEstadoLower = estadoBase.setValue(ProtectionCoreBlock.LEVEL, this.coreLevel);
+            this.level.setBlock(this.worldPosition, nuevoEstadoLower, 3);
+
+            // 2. Buscamos y actualizamos la parte superior
+            BlockPos upperPos = this.worldPosition.above();
+            BlockState estadoUpper = this.level.getBlockState(upperPos);
+
+            if (estadoUpper.getBlock() instanceof ProtectionCoreBlock &&
+                    estadoUpper.getValue(ProtectionCoreBlock.HALF) == DoubleBlockHalf.UPPER) {
+
+                this.level.setBlock(upperPos, estadoUpper.setValue(ProtectionCoreBlock.LEVEL, this.coreLevel), 3);
+            }
+        }
+
+        // 3. Forzamos la sincronización de la BlockEntity
+        this.setChanged();
+        this.level.sendBlockUpdated(this.worldPosition, estadoBase, estadoBase, 3);
     }
 
-    /**
-     * Activa o desactiva las explosiones en el área.
-     */
-    public void setExplosionsDisabled(boolean disabled) {
-        // En tu lógica de flags: false = protegido (explosiones desactivadas)
-        // Por lo tanto, si disabled es true, ponemos la flag en false.
-        this.setFlag("explosions", !disabled);
-    }
+    // --- FLAGS Y CONFIGURACIÓN ---
 
-    public List<String> getAllFlagKeys() {
-        return List.of("pvp", "explosions", "break", "build", "interact", "chests",
-                "mob-spawn", "mob-grief", "fire-spread", "fire-damage", // <--- Nueva
-                "use-buckets", "item-pickup", "item-drop", "crop-trample",
-                "lighter", "damage-animals", "villager-trade", "entry",
-                "enderpearl", "fall-damage", "hunger");
-    }
+    public static final List<String> BASIC_FLAGS = List.of("pvp", "build", "chests", "interact", "villager-trade", "fire-damage");
+    public static final List<String> ADMIN_FLAGS = List.of("explosions", "mob-spawn", "entry", "fall-damage", "fire-spread", "lighter", "item-pickup");
 
-    /**
-     * Controla si el fuego puede propagarse en el área.
-     * @param enabled true permite el fuego, false lo bloquea.
-     */
-    public void setFireSpread(boolean enabled) {
-        this.setFlag("fire-spread", enabled);
-    }
-
-    /**
-     * Controla si las entidades reciben daño por fuego/lava.
-     */
-    public void setFireDamage(boolean enabled) {
-        this.setFlag("fire-damage", enabled);
+    public void setFlag(String flag, boolean value) {
+        flags.put(flag, value);
+        markDirtyAndUpdate();
     }
 
     public boolean getFlag(String flag) {
-        // Si la flag no existe en el mapa, devolvemos un valor seguro según la flag
-        if (!flags.containsKey(flag)) {
-            if (flag.equals("build") || flag.equals("break") || flag.equals("entry")) return true;
-            return false;
+
+        if (flags.containsKey(flag)) {
+            return flags.get(flag);
         }
-        return flags.get(flag);
+
+        return flag.equals("entry") || flag.equals("hunger") || flag.equals("fire-spread");
     }
 
-
-    public void setFlag(String flag, boolean value) { flags.put(flag, value); markDirtyAndUpdate(); }
-
-    // --- PERSISTENCIA NBT ---
+    // --- PERSISTENCIA NBT (ACTUALIZADA A UUID) ---
 
     @Override
     protected void saveAdditional(CompoundTag tag, HolderLookup.Provider registries) {
@@ -464,32 +373,29 @@ public class ProtectionCoreBlockEntity extends BlockEntity implements MenuProvid
         tag.putInt("AdminRadius", this.adminRadius);
         tag.putString("ClanName", this.clanName);
         if (ownerUUID != null) tag.putUUID("Owner", ownerUUID);
-        if (ownerName != null) tag.putString("OwnerName", ownerName);
+        tag.putString("OwnerName", this.ownerName);
 
+        // Guardar Flags
         CompoundTag flagsTag = new CompoundTag();
         flags.forEach(flagsTag::putBoolean);
         tag.put("CoreFlags", flagsTag);
 
-        CompoundTag permsTag = new CompoundTag();
-        permissionsMap.forEach((name, perms) -> {
+        // Guardar Permisos con UUID
+        ListTag permsList = new ListTag();
+        permissionsMap.forEach((uuid, perms) -> {
             CompoundTag pTag = new CompoundTag();
+            pTag.putUUID("uuid", uuid);
+            pTag.putString("name", nameCache.getOrDefault(uuid, "Unknown"));
             pTag.putBoolean("build", perms.canBuild);
             pTag.putBoolean("interact", perms.canInteract);
             pTag.putBoolean("chests", perms.canOpenChests);
-            permsTag.put(name, pTag);
+            permsList.add(pTag);
         });
-        tag.put("PermissionsData", permsTag);
+        tag.put("PermissionsList", permsList);
 
-        ListTag items = new ListTag();
-        for (int i = 0; i < inventory.getContainerSize(); i++) {
-            ItemStack st = inventory.getItem(i);
-            if (!st.isEmpty()) {
-                CompoundTag itemTag = new CompoundTag();
-                itemTag.putInt("Slot", i);
-                items.add(st.save(registries, itemTag));
-            }
-        }
-        tag.put("Items", items);
+        // Inventario
+        tag.put("Inventory", this.inventory.serializeNBT(registries));
+        tag.putInt("Range", this.range);
     }
 
     @Override
@@ -499,127 +405,115 @@ public class ProtectionCoreBlockEntity extends BlockEntity implements MenuProvid
         this.adminRadius = tag.getInt("AdminRadius");
         this.clanName = tag.getString("ClanName");
         if (tag.hasUUID("Owner")) this.ownerUUID = tag.getUUID("Owner");
-        if (tag.contains("OwnerName")) this.ownerName = tag.getString("OwnerName");
+        this.ownerName = tag.getString("OwnerName");
 
         this.flags.clear();
-        if (tag.contains("CoreFlags")) {
-            CompoundTag flagsTag = tag.getCompound("CoreFlags");
-            for (String key : flagsTag.getAllKeys()) this.flags.put(key, flagsTag.getBoolean(key));
-        }
+        CompoundTag flagsTag = tag.getCompound("CoreFlags");
+        for (String key : flagsTag.getAllKeys()) this.flags.put(key, flagsTag.getBoolean(key));
 
         this.permissionsMap.clear();
-        if (tag.contains("PermissionsData")) {
-            CompoundTag permsTag = tag.getCompound("PermissionsData");
-            for (String name : permsTag.getAllKeys()) {
-                CompoundTag pTag = permsTag.getCompound(name);
-                this.permissionsMap.put(name, new PlayerPermissions(pTag.getBoolean("build"), pTag.getBoolean("interact"), pTag.getBoolean("chests")));
-            }
+        this.nameCache.clear();
+        ListTag permsList = tag.getList("PermissionsList", 10);
+        for (int i = 0; i < permsList.size(); i++) {
+            CompoundTag pTag = permsList.getCompound(i);
+            UUID uuid = pTag.getUUID("uuid");
+            this.nameCache.put(uuid, pTag.getString("name"));
+            this.permissionsMap.put(uuid, new PlayerPermissions(pTag.getBoolean("build"), pTag.getBoolean("interact"), pTag.getBoolean("chests")));
         }
 
-        this.inventory.clearContent();
-        if (tag.contains("Items")) {
-            ListTag items = tag.getList("Items", 10);
-            for (int i = 0; i < items.size(); i++) {
-                CompoundTag itemTag = items.getCompound(i);
-                int slot = itemTag.getInt("Slot");
-                ItemStack stack = ItemStack.parse(registries, itemTag).orElse(ItemStack.EMPTY);
-                if (slot >= 0 && slot < inventory.getContainerSize()) inventory.setItem(slot, stack);
-            }
+        if (tag.contains("Inventory")) {
+            this.inventory.deserializeNBT(registries, tag.getCompound("Inventory"));
+        }
+        this.range = tag.getInt("Range");
+        if (this.level != null && !this.level.isClientSide) {
+            markDirtyAndUpdate();
         }
     }
 
-    // --- SINCRONIZACIÓN ---
+    // --- UTILIDADES ---
 
     public void markDirtyAndUpdate() {
         this.setChanged();
-        if (level != null) {
-            level.sendBlockUpdated(worldPosition, getBlockState(), getBlockState(), 3);
+        if (level != null) level.sendBlockUpdated(worldPosition, getBlockState(), getBlockState(), 3);
+    }
+
+    private int obtenerRadioPorNivel(int nivel) {
+        return switch (nivel) {
+            case 1 -> 8; case 2 -> 16; case 3 -> 32; case 4 -> 64; case 5 -> 128;
+            default -> 8;
+        };
+    }
+
+    public UUID getOwnerUUID() { return this.ownerUUID != null ? this.ownerUUID : UUID.randomUUID(); }
+    public String getOwnerName() { return (clanName != null && !clanName.isEmpty()) ? clanName : ownerName; }
+    public void setOwner(UUID uuid, String name) { this.ownerUUID = uuid; this.ownerName = name; markDirtyAndUpdate(); }
+    public int getRadius() { return isAdmin() ? adminRadius : obtenerRadioPorNivel(coreLevel); }
+    public boolean isAdmin() { return getBlockState().is(ModBlocks.ADMIN_PROTECTOR.get()); }
+
+    public void setAdminRadius(int newRadius) {
+        this.adminRadius = newRadius;
+        this.markDirtyAndUpdate();
+    }
+
+    private void efectosMejora() {
+        if (this.level instanceof ServerLevel sl) {
+            sl.playSound(null, worldPosition, SoundEvents.PLAYER_LEVELUP, SoundSource.BLOCKS, 1f, 1f);
+            sl.sendParticles(ParticleTypes.TOTEM_OF_UNDYING, worldPosition.getX()+0.5, worldPosition.getY()+1, worldPosition.getZ()+0.5, 30, 0.5, 0.5, 0.5, 0.15);
         }
     }
 
-    public net.minecraft.world.phys.AABB getRenderBoundingBox() {
-        // Expandimos el cuadro de renderizado para cubrir 2 bloques de altura (0 a 2)
-        // Esto evita que el modelo desaparezca al mirar hacia arriba
-        return new net.minecraft.world.phys.AABB(worldPosition).expandTowards(0, 1, 0);
+    public boolean canUpgrade() {
+        // 1. Validaciones básicas
+        if (isAdmin() || coreLevel >= 5) return false;
+
+        // 2. Obtener items usando getStackInSlot (Cambio clave)
+        ItemStack up = inventory.getStackInSlot(0);
+        ItemStack mat = inventory.getStackInSlot(1);
+
+        // 3. Verificar el objeto de mejora
+        if (!up.is(com.tumod.protectormod.registry.ModItems.PROTECTION_UPGRADE.get())) return false;
+
+        // 4. Lógica de materiales por nivel
+        return switch (coreLevel) {
+            case 1 -> mat.is(net.minecraft.world.item.Items.IRON_INGOT) && mat.getCount() >= 64;
+            case 2 -> mat.is(net.minecraft.world.item.Items.GOLD_INGOT) && mat.getCount() >= 32;
+            case 3 -> mat.is(net.minecraft.world.item.Items.DIAMOND) && mat.getCount() >= 32;
+            case 4 -> mat.is(net.minecraft.world.item.Items.NETHERITE_INGOT) && mat.getCount() >= 32;
+            default -> false;
+        };
     }
 
-    public void setCoreLevelClient(int level) {
-        this.coreLevel = level;
+    @Override
+    public ClientboundBlockEntityDataPacket getUpdatePacket() {
+        return ClientboundBlockEntityDataPacket.create(this);
     }
 
     @Override
     public CompoundTag getUpdateTag(HolderLookup.Provider registries) {
         CompoundTag tag = super.getUpdateTag(registries);
-        saveAdditional(tag, registries); // Empaqueta el ownerName y las flags
+        saveAdditional(tag, registries); // Forzamos que guarde TODA nuestra info personalizada
         return tag;
     }
 
-    @Override
-    public ClientboundBlockEntityDataPacket getUpdatePacket() {
-        // Crea el paquete de red para enviar al cliente
-        return ClientboundBlockEntityDataPacket.create(this);
-    }
-
-    @Override
-    public void onDataPacket(net.minecraft.network.Connection net, ClientboundBlockEntityDataPacket pkt, HolderLookup.Provider registries) {
-        CompoundTag tag = pkt.getTag();
-        if (tag != null) {
-            // Carga los datos recibidos en la instancia del cliente
-            loadAdditional(tag, registries);
-
-            // Si el bloque tiene niveles (Admin Core), forzamos un refresco visual
-            if (level != null && level.isClientSide) {
-                level.sendBlockUpdated(worldPosition, getBlockState(), getBlockState(), 3);
-            }
-        }
-    }
-
-    // --- GUI Y OTROS ---
-
-    @Nullable
-    @Override
-    public AbstractContainerMenu createMenu(int id, Inventory inv, Player player) {
+    @Override public AbstractContainerMenu createMenu(int id, Inventory inv, Player p) {
         return new ProtectionCoreMenu(isAdmin() ? ModMenus.ADMIN_CORE_MENU.get() : ModMenus.PROTECTION_CORE_MENU.get(), id, inv, this);
     }
-
     @Override public Component getDisplayName() { return Component.literal("Protection Core"); }
 
     public static class PlayerPermissions {
-        public boolean canBuild, canInteract, canOpenChests;
+        // Estas variables deben coincidir con los nombres que usas en saveAdditional
+        public boolean canBuild = false;
+        public boolean canInteract = false;
+        public boolean canOpenChests = false;
+
+        // Constructor vacío (necesario para cargar desde NBT)
         public PlayerPermissions() {}
-        public PlayerPermissions(boolean b, boolean i, boolean c) { this.canBuild = b; this.canInteract = i; this.canOpenChests = c; }
-    }
 
-    // Getters y Setters básicos
-
-    public UUID getOwnerUUID() {
-        return this.ownerUUID != null ? this.ownerUUID : UUID.nameUUIDFromBytes("none".getBytes());
-    }
-
-    // En ProtectionCoreBlockEntity.java
-    public String getOwnerName() {
-        // Si hay un clan, mostramos el clan, si no, el nombre del dueño guardado
-        if (this.clanName != null && !this.clanName.isEmpty()) {
-            return this.clanName;
+        // Constructor rápido (opcional, para conveniencia)
+        public PlayerPermissions(boolean build, boolean interact, boolean chests) {
+            this.canBuild = build;
+            this.canInteract = interact;
+            this.canOpenChests = chests;
         }
-        return this.ownerName;
     }
-
-    public void setOwner(UUID uuid, String name) {
-        this.ownerUUID = uuid;
-        this.ownerName = name;
-        this.markDirtyAndUpdate();
-    }
-
-    // Mantén este por compatibilidad, pero usa el de arriba al colocar el bloque
-    public void setOwner(UUID uuid) {
-        this.ownerUUID = uuid;
-        this.markDirtyAndUpdate();
-    }
-
-
-    public void setClanName(String name) { this.clanName = name; markDirtyAndUpdate(); }
-    public String getClanName() { return this.clanName; }
-    public int getCoreLevel() { return this.coreLevel; }
-    public SimpleContainer getInventory() { return this.inventory; }
 }

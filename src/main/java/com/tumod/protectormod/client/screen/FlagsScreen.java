@@ -51,8 +51,8 @@ public class FlagsScreen extends Screen {
     }
 
     private void createFlagButton(String flagId, int x, int y) {
+        // 🔹 IMPORTANTE: Leer el valor directamente del core en cada renderizado de botón
         boolean active = core.getFlag(flagId);
-        // Usamos un color diferente para las flags de admin para que se distingan
         boolean isAdminFlag = ProtectionCoreBlockEntity.ADMIN_FLAGS.contains(flagId);
         String prefix = isAdminFlag ? "§4⚙ " : "§6• ";
 
@@ -60,9 +60,11 @@ public class FlagsScreen extends Screen {
                 Component.literal(prefix + capitalize(flagId) + ": ")
                         .append(active ? Component.literal("§aON") : Component.literal("§cOFF")),
                 b -> {
+                    // Enviamos al servidor
                     PacketDistributor.sendToServer(new UpdateFlagPayload(core.getBlockPos(), flagId));
+                    // Actualizamos localmente para feedback inmediato
                     core.setFlag(flagId, !active);
-                    this.rebuildWidgets(); // Refresca los botones para mostrar el nuevo estado
+                    this.rebuildWidgets();
                 }).bounds(x, y, 140, 20).build());
     }
 

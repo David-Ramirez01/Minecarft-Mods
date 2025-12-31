@@ -1,6 +1,5 @@
 package com.tumod.protectormod;
 
-import com.tumod.protectormod.event.ProtectionEvent;
 import com.tumod.protectormod.network.*;
 import com.tumod.protectormod.registry.*;
 import net.neoforged.bus.api.IEventBus;
@@ -77,6 +76,22 @@ public class ProtectorMod {
                 UpdateFlagPayload.TYPE,
                 UpdateFlagPayload.CODEC,
                 ServerPayloadHandler::handleUpdateFlag
+        );
+        registrar.playToClient(
+                SyncProtectionPayload.TYPE,
+                SyncProtectionPayload.STREAM_CODEC, // <--- Cambiado de .CODEC a .STREAM_CODEC
+                (payload, context) -> {
+                    context.enqueueWork(() -> {
+                        // Actualizamos la instancia del cliente con los nuevos datos
+                        // Usamos el método 'get' que modificamos antes para el cliente
+                        var data = com.tumod.protectormod.util.ProtectionDataManager.get(context.player().level());
+                        data.getAllCores().clear();
+                        data.getAllCores().putAll(payload.allCores());
+
+                        // Opcional: Log para verificar en consola que llegan los datos
+                        // ProtectorMod.LOGGER.info("Sincronizados {} núcleos de protección", payload.allCores().size());
+                    });
+                }
         );
 
     }

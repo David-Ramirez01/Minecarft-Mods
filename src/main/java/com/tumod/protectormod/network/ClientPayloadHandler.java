@@ -49,8 +49,4 @@ public class ClientPayloadHandler {
             }
         });
     }
-
-
-
-
 }

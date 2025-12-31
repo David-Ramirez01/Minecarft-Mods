@@ -13,12 +13,10 @@ public record ShowAreaPayload(BlockPos pos, int radius) implements CustomPacketP
     public static final Type<ShowAreaPayload> TYPE =
             new Type<>(ResourceLocation.fromNamespaceAndPath(ProtectorMod.MOD_ID, "show_area"));
 
-    public static final StreamCodec<FriendlyByteBuf, ShowAreaPayload> CODEC = StreamCodec.of(
-            (buf, payload) -> {
-                buf.writeBlockPos(payload.pos());
-                buf.writeInt(payload.radius());
-            },
-            buf -> new ShowAreaPayload(buf.readBlockPos(), buf.readInt())
+    public static final StreamCodec<FriendlyByteBuf, ShowAreaPayload> CODEC = StreamCodec.composite(
+            BlockPos.STREAM_CODEC, ShowAreaPayload::pos,
+            net.minecraft.network.codec.ByteBufCodecs.VAR_INT, ShowAreaPayload::radius,
+            ShowAreaPayload::new
     );
 
     @Override
