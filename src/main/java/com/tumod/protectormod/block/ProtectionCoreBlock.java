@@ -108,12 +108,13 @@ public class ProtectionCoreBlock extends Block implements EntityBlock {
         }
 
         // Colocar mitad superior
-        level.setBlock(pos.above(), state.setValue(HALF, DoubleBlockHalf.UPPER), 3);
+        level.setBlock(pos.above(), state.setValue(HALF, DoubleBlockHalf.UPPER).setValue(FACING, state.getValue(FACING)), 3);
         super.setPlacedBy(level, pos, state, placer, stack);
     }
 
     @Override
     public void onRemove(BlockState state, Level level, BlockPos pos, BlockState newState, boolean isMoving) {
+        // Si el bloque sigue siendo el mismo (ej: solo cambió el nivel o la rotación), NO hacer nada
         if (state.is(newState.getBlock())) {
             super.onRemove(state, level, pos, newState, isMoving);
             return;
@@ -121,29 +122,37 @@ public class ProtectionCoreBlock extends Block implements EntityBlock {
 
         if (!level.isClientSide && level instanceof ServerLevel sLevel) {
             BlockPos basePos = state.getValue(HALF) == DoubleBlockHalf.UPPER ? pos.below() : pos;
-            BlockEntity be = level.getBlockEntity(basePos);
 
-            if (be instanceof ProtectionCoreBlockEntity core) {
-                // 1. Limpiar del Manager Global (Esto elimina partículas y protección de red)
-                ProtectionDataManager.get(sLevel).removeCore(basePos);
-                ProtectionDataManager.get(sLevel).syncToAll(sLevel);
+            // Solo procesamos la lógica de datos si estamos eliminando la BASE
+            if (state.getValue(HALF) == DoubleBlockHalf.LOWER) {
+                BlockEntity be = level.getBlockEntity(basePos);
+                if (be instanceof ProtectionCoreBlockEntity core) {
+                    ProtectionDataManager.get(sLevel).removeCore(basePos);
+                    ProtectionDataManager.get(sLevel).syncToAll(sLevel);
 
-                // 2. Limpiar ClanSavedData
-                var clanData = com.tumod.protectormod.util.ClanSavedData.get(sLevel);
-                if (core.getOwnerUUID() != null) {
-                    clanData.deleteClan(core.getOwnerUUID());
-                    ServerPlayer owner = sLevel.getServer().getPlayerList().getPlayer(core.getOwnerUUID());
-                    if (owner != null) owner.displayClientMessage(Component.literal("§eNúcleo destruido. Cupo liberado."), true);
+                    var clanData = com.tumod.protectormod.util.ClanSavedData.get(sLevel);
+                    if (core.getOwnerUUID() != null) {
+                        clanData.deleteClan(core.getOwnerUUID());
+                    }
                 }
             }
 
-            // 3. Eliminar la otra mitad
+            // Eliminar la otra mitad sin disparar drops infinitos
             DoubleBlockHalf half = state.getValue(HALF);
             BlockPos otherPos = (half == DoubleBlockHalf.LOWER) ? pos.above() : pos.below();
-            if (level.getBlockState(otherPos).is(this)) {
-                level.removeBlock(otherPos, false);
+            BlockState otherState = level.getBlockState(otherPos);
+            if (otherState.is(this) && otherState.getValue(HALF) != half) {
+                // Usamos flags específicos para evitar recursión
+                level.setBlock(otherPos, Blocks.AIR.defaultBlockState(), 35);
+                level.levelEvent(null, 2001, otherPos, Block.getId(otherState));
             }
         }
+
+        // Importante: Eliminar el BlockEntity solo si no es un cambio de estado interno
+        if (state.hasBlockEntity() && (!state.is(newState.getBlock()) || !newState.hasBlockEntity())) {
+            level.removeBlockEntity(pos);
+        }
+
         super.onRemove(state, level, pos, newState, isMoving);
     }
 
@@ -174,6 +183,15 @@ public class ProtectionCoreBlock extends Block implements EntityBlock {
     }
 
     @Override
+    public BlockState getStateForPlacement(net.minecraft.world.item.context.BlockPlaceContext context) {
+        // Esto hace que el frente del bloque (FACING) sea la dirección opuesta a la que mira el jugador
+        return this.defaultBlockState()
+                .setValue(FACING, context.getHorizontalDirection().getOpposite())
+                .setValue(HALF, DoubleBlockHalf.LOWER)
+                .setValue(LEVEL, 1);
+    }
+
+    @Override
     public BlockState updateShape(BlockState state, Direction direction, BlockState neighborState, LevelAccessor level, BlockPos pos, BlockPos neighborPos) {
         DoubleBlockHalf half = state.getValue(HALF);
         if (direction.getAxis() == Direction.Axis.Y && half == DoubleBlockHalf.LOWER == (direction == Direction.UP)) {
@@ -190,6 +208,40 @@ public class ProtectionCoreBlock extends Block implements EntityBlock {
             if (!player.getInventory().add(item)) player.drop(item, false);
         }
         level.setBlock(pos, Blocks.AIR.defaultBlockState(), 3);
+    }
+
+    @Override
+    public BlockState playerWillDestroy(Level level, BlockPos pos, BlockState state, Player player) {
+        if (!level.isClientSide) {
+            if (player.isCreative()) {
+                preventCreativeDropFromBottomPart(level, pos, state, player);
+            }
+        }
+        super.playerWillDestroy(level, pos, state, player);
+        return state;
+    }
+
+    @Override
+    public void playerDestroy(Level level, Player player, BlockPos pos, BlockState state, @Nullable BlockEntity blockEntity, ItemStack tool) {
+        super.playerDestroy(level, player, pos, state, blockEntity, tool);
+
+        // FORZAR DROP: Si se rompe en supervivencia y es la parte inferior
+        if (!level.isClientSide && !player.isCreative() && state.getValue(HALF) == DoubleBlockHalf.LOWER) {
+            popResource(level, pos, new ItemStack(this.asItem()));
+        }
+    }
+
+    // Método auxiliar para manejar la destrucción de la parte doble
+    protected static void preventCreativeDropFromBottomPart(Level level, BlockPos pos, BlockState state, Player player) {
+        DoubleBlockHalf half = state.getValue(HALF);
+        if (half == DoubleBlockHalf.UPPER) {
+            BlockPos blockpos = pos.below();
+            BlockState blockstate = level.getBlockState(blockpos);
+            if (blockstate.is(state.getBlock()) && blockstate.getValue(HALF) == DoubleBlockHalf.LOWER) {
+                level.setBlock(blockpos, Blocks.AIR.defaultBlockState(), 35);
+                level.levelEvent(player, 2001, blockpos, Block.getId(blockstate));
+            }
+        }
     }
 }
 

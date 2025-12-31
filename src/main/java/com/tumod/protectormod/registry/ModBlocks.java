@@ -6,6 +6,7 @@ import com.tumod.protectormod.block.ProtectionCoreBlock;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockBehaviour;
+import net.minecraft.world.level.block.state.properties.NoteBlockInstrument;
 import net.minecraft.world.level.material.MapColor;
 import net.neoforged.neoforge.registries.DeferredHolder;
 import net.neoforged.neoforge.registries.DeferredRegister;
@@ -23,6 +24,7 @@ public class ModBlocks {
                             .strength(3.0f, 1200.0f)
                             .noOcclusion() // <--- CORRECTO
                             .lightLevel(state -> 10)
+                            .instrument(NoteBlockInstrument.IRON_XYLOPHONE)
             ));
 
     // Bloque Admin Protector - CORREGIDO
