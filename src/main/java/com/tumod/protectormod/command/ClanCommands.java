@@ -102,20 +102,31 @@ public class ClanCommands {
                             return 1;
                         })
                 )
-                        .then(Commands.literal("limit")
-                                .requires(s -> s.hasPermission(2)) // Solo Admins
-                                .then(Commands.argument("cantidad", IntegerArgumentType.integer(1, 100))
-                                        .executes(c -> {
-                                            int nuevaCant = IntegerArgumentType.getInteger(c, "cantidad");
-                                            ServerLevel level = c.getSource().getLevel();
-                                            ClanSavedData data = ClanSavedData.get(level);
+                .then(Commands.literal("limit")
+                        .requires(s -> s.hasPermission(2)) // Solo Admins pueden ejecutarlo
+                        .then(Commands.argument("cantidad", IntegerArgumentType.integer(1, 100))
+                                .executes(c -> {
+                                    int nuevaCant = IntegerArgumentType.getInteger(c, "cantidad");
+                                    ServerLevel level = c.getSource().getLevel();
 
-                                            data.setServerMaxCores(nuevaCant); // Usa un setter que marque setDirty()
+                                    // 1. Guardar el dato en el Manager
+                                    ProtectionDataManager manager = ProtectionDataManager.get(level);
+                                    manager.setGlobalLimit(nuevaCant);
 
-                                            c.getSource().sendSuccess(() -> Component.literal("§6[Protector] §aLímite global actualizado a: §f" + nuevaCant), true);
-                                            return 1;
-                                        }))
-                        )
+                                    // 2. Mensaje para quien ejecutó el comando
+                                    c.getSource().sendSuccess(() -> Component.literal("§6[Protector] §aLímite global actualizado a: §f" + nuevaCant), true);
+
+                                    // 3. Notificar a otros OPs conectados (Broadcast silencioso)
+                                    Component notification = Component.literal("§7[Staff] " + c.getSource().getTextName() + " cambió el límite de núcleos a: " + nuevaCant);
+                                    level.getServer().getPlayerList().getPlayers().forEach(player -> {
+                                        if (player.hasPermissions(2) && player != c.getSource().getEntity()) {
+                                            player.displayClientMessage(notification, false);
+                                        }
+                                    });
+
+                                    return 1;
+                                }))
+                )
                 .then(Commands.literal("list")
                         .requires(s -> s.hasPermission(2))
                         .executes(context -> executeList(context.getSource())))

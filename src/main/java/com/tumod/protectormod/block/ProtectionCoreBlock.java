@@ -78,6 +78,7 @@ public class ProtectionCoreBlock extends Block implements EntityBlock {
         if (level.isClientSide || !(placer instanceof Player player)) return;
         ServerLevel sLevel = (ServerLevel) level;
 
+        // 1. Validar espacio físico superior
         if (!level.getBlockState(pos.above()).isAir() && !level.getBlockState(pos.above()).canBeReplaced()) {
             cancelarColocacion(level, pos, player, stack, "§c[!] No hay espacio suficiente.");
             return;
@@ -86,7 +87,19 @@ public class ProtectionCoreBlock extends Block implements EntityBlock {
         boolean isAdminCore = state.is(ModBlocks.ADMIN_PROTECTOR.get());
         ProtectionDataManager manager = ProtectionDataManager.get(sLevel);
 
-        // Validar solapamiento
+        // 2. Validar límite de núcleos
+        if (!isAdminCore && !player.hasPermissions(2)) {
+            long playerCoreCount = manager.getAllCores().values().stream()
+                    .filter(entry -> entry.owner().equals(player.getUUID()))
+                    .count();
+
+            if (playerCoreCount >= manager.getGlobalLimit()) {
+                cancelarColocacion(level, pos, player, stack, "§c[!] Límite alcanzado: " + manager.getGlobalLimit());
+                return;
+            }
+        }
+
+        // 3. Validar solapamiento
         if (!isAdminCore && !player.hasPermissions(2)) {
             int miRadioInicial = 10;
             boolean overlaps = manager.getAllCores().entrySet().stream()
@@ -94,21 +107,27 @@ public class ProtectionCoreBlock extends Block implements EntityBlock {
                             Math.sqrt(pos.distSqr(entry.getKey())) < (miRadioInicial + entry.getValue().radius()));
 
             if (overlaps) {
-                cancelarColocacion(level, pos, player, stack, "§c[!] El área de este núcleo choca con otra zona protegida.");
+                cancelarColocacion(level, pos, player, stack, "§c[!] El área choca con otra zona protegida.");
                 return;
             }
         }
 
-        // Configurar BlockEntity y Manager
+        // --- A PARTIR DE AQUÍ TODO ESTÁ VALIDADO ---
+
+        // 4. Colocar la mitad superior PRIMERO
+        BlockState upperState = state.setValue(HALF, DoubleBlockHalf.UPPER).setValue(FACING, state.getValue(FACING));
+        level.setBlock(pos.above(), upperState, 3);
+
+        // 5. Configurar BlockEntity y REGISTRAR (Al final)
         BlockEntity be = level.getBlockEntity(pos);
         if (be instanceof ProtectionCoreBlockEntity core) {
             core.setOwner(player.getUUID(), player.getName().getString());
+
+            // REGISTRO DEFINITIVO EN EL MANAGER
             manager.addCore(pos, player.getUUID(), core.getRadius());
             manager.syncToAll(sLevel);
         }
 
-        // Colocar mitad superior
-        level.setBlock(pos.above(), state.setValue(HALF, DoubleBlockHalf.UPPER).setValue(FACING, state.getValue(FACING)), 3);
         super.setPlacedBy(level, pos, state, placer, stack);
     }
 

@@ -18,6 +18,7 @@ import java.util.UUID;
 public class ProtectionDataManager extends SavedData {
     // Mapa principal: Posición del bloque físico -> Datos del núcleo
     private final Map<BlockPos, CoreEntry> allCores = new HashMap<>();
+    private int globalLimit = 1;
 
     // DEFINICIÓN ÚNICA DEL RECORD: Incluye la posición para que Utils pueda leer entry.pos()
     public record CoreEntry(BlockPos pos, UUID owner, int radius) {}
@@ -69,6 +70,13 @@ public class ProtectionDataManager extends SavedData {
 
     public static ProtectionDataManager load(CompoundTag tag, HolderLookup.Provider registries) {
         ProtectionDataManager data = new ProtectionDataManager();
+
+        // 1. Cargar el límite global (Fuera del bucle de los núcleos)
+        if (tag.contains("globalLimit")) {
+            data.globalLimit = tag.getInt("globalLimit");
+        }
+
+        // 2. Cargar los núcleos
         ListTag list = tag.getList("Cores", Tag.TAG_COMPOUND);
         for (int i = 0; i < list.size(); i++) {
             CompoundTag entryTag = list.getCompound(i);
@@ -79,6 +87,13 @@ public class ProtectionDataManager extends SavedData {
         }
         return data;
     }
+
+    public int getGlobalLimit() { return globalLimit; }
+    public void setGlobalLimit(int limit) {
+        this.globalLimit = limit;
+        this.setDirty(); // Importante: marca que hay que guardar el archivo
+    }
+
 
     @Override
     public CompoundTag save(CompoundTag tag, HolderLookup.Provider registries) {
@@ -91,6 +106,7 @@ public class ProtectionDataManager extends SavedData {
             list.add(entryTag);
         });
         tag.put("Cores", list);
+        tag.putInt("globalLimit", globalLimit);
         return tag;
     }
 
