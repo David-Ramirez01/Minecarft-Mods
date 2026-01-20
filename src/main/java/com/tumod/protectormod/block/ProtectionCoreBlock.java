@@ -28,6 +28,7 @@ import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
 import net.minecraft.world.level.block.state.properties.IntegerProperty;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.shapes.CollisionContext;
+import net.minecraft.world.phys.shapes.Shapes;
 import net.minecraft.world.phys.shapes.VoxelShape;
 import org.jetbrains.annotations.Nullable;
 
@@ -56,10 +57,7 @@ public class ProtectionCoreBlock extends Block implements EntityBlock {
 
     @Override
     public VoxelShape getShape(BlockState state, BlockGetter level, BlockPos pos, CollisionContext context) {
-        if (state.getValue(HALF) == DoubleBlockHalf.UPPER) {
-            return Block.box(2.0D, 0.0D, 2.0D, 14.0D, 16.0D, 14.0D);
-        }
-        return Block.box(0.0D, 0.0D, 0.0D, 16.0D, 16.0D, 16.0D);
+        return net.minecraft.world.phys.shapes.Shapes.block(); // Cubo 16x16x16
     }
 
     @Override

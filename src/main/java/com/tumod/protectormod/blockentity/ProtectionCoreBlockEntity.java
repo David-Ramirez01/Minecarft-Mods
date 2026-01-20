@@ -60,22 +60,22 @@ public class ProtectionCoreBlockEntity extends BlockEntity implements MenuProvid
     public void initializeDefaultFlags() {
         this.flags.clear();
         for (String f : getAllFlagKeys()) {
-            // Permitir entrar y hambre por defecto, el resto protegido
-            if (f.equals("entry") || f.equals("hunger") || f.equals("fire-spread")) {
+            if (f.equals("entry") || f.equals("hunger") || f.equals("fire-spread") || f.equals("item-pickup")) {
                 flags.put(f, true);
             } else {
+                // El resto en FALSE (protegido)
                 flags.put(f, false);
             }
         }
     }
 
     public List<String> getAllFlagKeys() {
-        return List.of("pvp", "explosions", "break", "build", "interact", "chests",
-                "mob-spawn", "mob-grief", "fire-spread", "fire-damage",
-                "use-buckets", "item-pickup", "item-drop", "crop-trample",
-                "lighter", "damage-animals", "villager-trade", "entry",
-                "enderpearl", "fall-damage", "hunger");
+        List<String> all = new ArrayList<>();
+        all.addAll(BASIC_FLAGS);
+        all.addAll(ADMIN_FLAGS);
+        return all;
     }
+
     public ProtectionCoreBlockEntity(BlockPos pos, BlockState state) {
         this(ModBlockEntities.PROTECTION_CORE_BE.get(), pos, state);
     }
@@ -347,8 +347,8 @@ public class ProtectionCoreBlockEntity extends BlockEntity implements MenuProvid
 
     // --- FLAGS Y CONFIGURACIÓN ---
 
-    public static final List<String> BASIC_FLAGS = List.of("pvp", "build", "chests", "interact", "villager-trade", "fire-damage");
-    public static final List<String> ADMIN_FLAGS = List.of("explosions", "mob-spawn", "entry", "fall-damage", "fire-spread", "lighter", "item-pickup");
+    public static final List<String> BASIC_FLAGS = List.of("pvp", "build", "chests", "interact", "villager-trade", "fire-damage", "hunger");
+    public static final List<String> ADMIN_FLAGS = List.of("explosions", "mob-spawn", "entry", "fall-damage", "fire-spread", "lighter", "item-pickup", "mob-grief", "use-buckets", "item-drop", "crop-trample", "enderpearl");
 
     public void setFlag(String flag, boolean value) {
         flags.put(flag, value);
@@ -356,11 +356,9 @@ public class ProtectionCoreBlockEntity extends BlockEntity implements MenuProvid
     }
 
     public boolean getFlag(String flag) {
-
         if (flags.containsKey(flag)) {
             return flags.get(flag);
         }
-
         return flag.equals("entry") || flag.equals("hunger") || flag.equals("fire-spread");
     }
 

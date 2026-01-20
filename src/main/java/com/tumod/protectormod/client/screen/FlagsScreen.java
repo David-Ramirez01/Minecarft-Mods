@@ -7,8 +7,8 @@ import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.neoforged.neoforge.network.PacketDistributor;
+import java.util.ArrayList;
 import java.util.List;
-import net.minecraft.network.chat.Component;
 
 public class FlagsScreen extends Screen {
     private final ProtectionCoreBlockEntity core;
@@ -22,26 +22,27 @@ public class FlagsScreen extends Screen {
 
     @Override
     protected void init() {
-        int startX = this.width / 2 - 145; // Un poco más a la izquierda para centrar las dos columnas
+        int startX = this.width / 2 - 145; // Centrado para dos columnas
         int startY = 45;
-        int buttonHeight = 20;
         int columnWidth = 150;
 
-        boolean isOp = this.minecraft.player.hasPermissions(2);
+        // --- UNIFICACIÓN DE TODAS LAS FLAGS ---
+        List<String> allFlags = new ArrayList<>();
+        allFlags.addAll(ProtectionCoreBlockEntity.BASIC_FLAGS);
+        allFlags.addAll(ProtectionCoreBlockEntity.ADMIN_FLAGS);
 
-        // --- COLUMNA 1: FLAGS BÁSICAS (Para todos) ---
-        List<String> basics = ProtectionCoreBlockEntity.BASIC_FLAGS;
-        for (int i = 0; i < basics.size(); i++) {
-            createFlagButton(basics.get(i), startX, startY + (i * 22));
-        }
+        // --- RENDERIZADO DINÁMICO EN COLUMNAS ---
+        for (int i = 0; i < allFlags.size(); i++) {
+            String flagId = allFlags.get(i);
 
-        // --- COLUMNA 2: FLAGS RESTRINGIDAS (Solo Admins) ---
-        if (isOp) {
-            List<String> restricted = ProtectionCoreBlockEntity.ADMIN_FLAGS;
-            for (int i = 0; i < restricted.size(); i++) {
-                // Dibujamos en la segunda columna (startX + columnWidth)
-                createFlagButton(restricted.get(i), startX + columnWidth, startY + (i * 22));
-            }
+            // Calculamos columna (0 o 1) y fila
+            int column = i % 2;
+            int row = i / 2;
+
+            int posX = startX + (column * columnWidth);
+            int posY = startY + (row * 22);
+
+            createFlagButton(flagId, posX, posY);
         }
 
         // Botón Volver
@@ -51,8 +52,9 @@ public class FlagsScreen extends Screen {
     }
 
     private void createFlagButton(String flagId, int x, int y) {
-        // 🔹 IMPORTANTE: Leer el valor directamente del core en cada renderizado de botón
         boolean active = core.getFlag(flagId);
+
+        // Mantenemos el icono visual para diferenciar el tipo de flag, aunque todos las vean
         boolean isAdminFlag = ProtectionCoreBlockEntity.ADMIN_FLAGS.contains(flagId);
         String prefix = isAdminFlag ? "§4⚙ " : "§6• ";
 
@@ -60,16 +62,15 @@ public class FlagsScreen extends Screen {
                 Component.literal(prefix + capitalize(flagId) + ": ")
                         .append(active ? Component.literal("§aON") : Component.literal("§cOFF")),
                 b -> {
-                    // Enviamos al servidor
                     PacketDistributor.sendToServer(new UpdateFlagPayload(core.getBlockPos(), flagId));
-                    // Actualizamos localmente para feedback inmediato
                     core.setFlag(flagId, !active);
-                    this.rebuildWidgets();
+                    this.rebuildWidgets(); // Refresca los botones para mostrar el cambio de ON/OFF
                 }).bounds(x, y, 140, 20).build());
     }
 
     private String capitalize(String str) {
         if (str == null || str.isEmpty()) return str;
+        // Reemplaza guiones por espacios y pone la primera letra en mayúscula
         return str.substring(0, 1).toUpperCase() + str.substring(1).replace("-", " ");
     }
 
@@ -77,11 +78,11 @@ public class FlagsScreen extends Screen {
     public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTicks) {
         this.renderBackground(graphics, mouseX, mouseY, partialTicks);
 
-        // Títulos de columnas
-        graphics.drawCenteredString(this.font, "§e§lFLAGS BÁSICAS", this.width / 2 - 75, 30, 0xFFFFFF);
-        if (this.minecraft.player.hasPermissions(2)) {
-            graphics.drawCenteredString(this.font, "§4§lADMINISTRACIÓN", this.width / 2 + 75, 30, 0xFFFFFF);
-        }
+        // Título centralizado
+        graphics.drawCenteredString(this.font, "§b§lCONFIGURACIÓN GLOBAL DE FLAGS", this.width / 2, 25, 0xFFFFFF);
+
+        // Nota informativa opcional en la parte inferior
+        graphics.drawCenteredString(this.font, "§7§oUsa ⚙ para flags de sistema y • para básicas", this.width / 2, this.height - 55, 0xAAAAAA);
 
         super.render(graphics, mouseX, mouseY, partialTicks);
     }

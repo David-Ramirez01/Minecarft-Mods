@@ -4,6 +4,7 @@ import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
+import com.tumod.protectormod.block.ProtectionCoreBlock;
 import com.tumod.protectormod.blockentity.AdminProtectorBlockEntity;
 import com.tumod.protectormod.blockentity.ProtectionCoreBlockEntity;
 import com.tumod.protectormod.util.ClanSavedData;
@@ -17,6 +18,8 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import org.jetbrains.annotations.Nullable;
@@ -49,43 +52,25 @@ public class ClanCommands {
                 // Dentro de tu registro en ClanCommands.java
                 .then(Commands.literal("admin")
                         .requires(s -> s.hasPermission(2))
-                        .then(Commands.literal("trust")
-                                .then(Commands.argument("player", EntityArgument.player())
-                                        .executes(context -> {
-                                            ServerPlayer target = EntityArgument.getPlayer(context, "player");
-                                            ServerPlayer admin = context.getSource().getPlayerOrException();
-                                            BlockHitResult hit = (BlockHitResult) admin.pick(5.0D, 0.0F, false);
-                                            BlockPos pos = hit.getBlockPos();
-
-                                            if (admin.level().getBlockEntity(pos) instanceof AdminProtectorBlockEntity adminCore) {
-                                                adminCore.updatePermission(target.getUUID(), target.getName().getString(), "build", true);
-                                                adminCore.markDirtyAndUpdate(); // <--- IMPORTANTE para persistencia
-                                                admin.sendSystemMessage(Component.literal("§d[Admin] §b" + target.getName().getString() + " §afue añadido."));
-                                                return 1;
-                                            }
-                                            admin.sendSystemMessage(Component.literal("§c[!] Debes mirar un núcleo de admin."));
-                                            return 0;
-                                        })
+                                .then(Commands.literal("trust")
+                                        .then(Commands.argument("player", EntityArgument.player())
+                                                .executes(context -> {
+                                                    ServerPlayer target = EntityArgument.getPlayer(context, "player");
+                                                    ServerPlayer admin = context.getSource().getPlayerOrException();
+                                                    return executeAdminCommand(admin, target, true);
+                                                })
+                                        )
                                 )
-                        )
-                        .then(Commands.literal("untrust") // <--- NUEVO: Para quitar permisos
-                                .then(Commands.argument("player", EntityArgument.player())
-                                        .executes(context -> {
-                                            ServerPlayer target = EntityArgument.getPlayer(context, "player");
-                                            ServerPlayer admin = context.getSource().getPlayerOrException();
-                                            BlockHitResult hit = (BlockHitResult) admin.pick(5.0D, 0.0F, false);
-                                            BlockPos pos = hit.getBlockPos();
-
-                                            if (admin.level().getBlockEntity(pos) instanceof AdminProtectorBlockEntity adminCore) {
-                                                adminCore.removePlayerPermissions(target.getName().getString());
-                                                adminCore.markDirtyAndUpdate();
-                                                admin.sendSystemMessage(Component.literal("§d[Admin] §b" + target.getName().getString() + " §cremovido."));
-                                                return 1;
-                                            }
-                                            return 0;
-                                        })
+                                 // COMANDO UNTRUST
+                                .then(Commands.literal("untrust")
+                                        .then(Commands.argument("player", EntityArgument.player())
+                                                .executes(context -> {
+                                                    ServerPlayer target = EntityArgument.getPlayer(context, "player");
+                                                    ServerPlayer admin = context.getSource().getPlayerOrException();
+                                                    return executeAdminCommand(admin, target, false);
+                                                })
+                                        )
                                 )
-                        )
                 )
                 .then(Commands.literal("help").executes(context -> showProtectorHelp(context.getSource())))
                 .then(Commands.literal("visualizer")
@@ -234,6 +219,48 @@ public class ClanCommands {
         data.deleteClan(player.getUUID());
         source.sendSuccess(() -> Component.literal("§eClan §b" + clan.name + " §edisuelto correctamente."), true);
         return 1;
+    }
+
+    private static int executeAdminCommand(ServerPlayer admin, ServerPlayer target, boolean isTrust) {
+        // 1. Raytrace para obtener qué bloque está mirando el admin
+        BlockHitResult hit = admin.level().clip(new net.minecraft.world.level.ClipContext(
+                admin.getEyePosition(),
+                admin.getEyePosition().add(admin.getViewVector(1.0F).scale(6.0D)),
+                net.minecraft.world.level.ClipContext.Block.OUTLINE,
+                net.minecraft.world.level.ClipContext.Fluid.NONE,
+                admin
+        ));
+
+        BlockPos hitPos = hit.getBlockPos();
+        ServerLevel level = admin.serverLevel();
+
+        // 2. Usamos el método centralizado findCoreAt que ya creamos en ProtectionEvent
+        // Esto es mucho mejor porque findCoreAt ya sabe manejar radios y posiciones guardadas
+        ProtectionCoreBlockEntity core = com.tumod.protectormod.event.ProtectionEvent.findCoreAt(level, hitPos);
+
+        // 3. Si no encuentra nada mirando, intentamos buscar donde está parado el admin (comodidad)
+        if (core == null) {
+            core = com.tumod.protectormod.event.ProtectionEvent.findCoreAt(level, admin.blockPosition());
+        }
+
+        // 4. Verificamos que sea un core y que sea de tipo ADMIN
+        if (core != null && core.isAdmin()) {
+            if (isTrust) {
+                // Usamos "build" como flag principal de confianza
+                core.updatePermission(target.getUUID(), target.getName().getString(), "build", true);
+                admin.sendSystemMessage(Component.literal("§d[Admin] §b" + target.getName().getString() + " §aahora es de confianza en esta zona."));
+            } else {
+                core.removePlayerPermissions(target.getName().getString());
+                admin.sendSystemMessage(Component.literal("§d[Admin] §b" + target.getName().getString() + " §cremovido de la zona."));
+            }
+
+            core.markDirtyAndUpdate();
+            return 1;
+        }
+
+        // 5. Error si no se encuentra un core de administración
+        admin.sendSystemMessage(Component.literal("§c[!] Debes mirar un núcleo de ADMINISTRACIÓN o estar dentro de su zona."));
+        return 0;
     }
 
     public static int executeAccept(CommandSourceStack source) throws CommandSyntaxException {

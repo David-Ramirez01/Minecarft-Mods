@@ -18,6 +18,7 @@ import net.minecraft.world.level.LevelAccessor;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.phys.Vec3;
+import net.neoforged.bus.api.EventPriority;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
 import com.tumod.protectormod.command.ClanCommands;
@@ -37,12 +38,64 @@ public class ProtectionEvent {
 
     private static final Map<UUID, BlockPos> PLAYER_CORE_CACHE = new HashMap<>();
 
-    // --- 1. GESTIÓN DE BLOQUES ---
+    // --- 1. EL CORTAFUEGOS (INTERACCIONES) ---
+    // Usamos HIGHEST para interceptar la acción antes que cualquier otra lógica de construcción.
+    @SubscribeEvent(priority = EventPriority.HIGHEST)
+    public static void onInteractBlock(PlayerInteractEvent.RightClickBlock event) {
+        if (event.getLevel().isClientSide) return;
+
+        BlockPos pos = event.getPos();
+        Player player = event.getEntity();
+        ServerLevel sLevel = (ServerLevel) event.getLevel();
+        ItemStack itemInHand = event.getItemStack();
+
+        ProtectionCoreBlockEntity core = findCoreAt(sLevel, pos);
+
+        // 1. Validaciones básicas de omisión
+        if (core == null || core.isTrusted(player) || pos.equals(core.getBlockPos())) return;
+
+        // 2. Identificar el tipo de bloque
+        BlockEntity be = sLevel.getBlockEntity(pos);
+        boolean isContainer = be instanceof net.minecraft.world.Container;
+
+        // 3. LÓGICA DE INDEPENDENCIA TOTAL
+        // Si es un cofre y la flag 'chests' está ON (Verde)
+        if (isContainer && core.getFlag("chests")) {
+            allowInteractionButDenyPlacement(event);
+            return;
+        }
+
+        // Si es un botón/puerta y la flag 'interact' está ON (Verde)
+        if (!isContainer && core.getFlag("interact")) {
+            allowInteractionButDenyPlacement(event);
+            return;
+        }
+
+        // 4. SI LLEGAMOS AQUÍ, es porque la flag específica está OFF o no es una interacción válida.
+        // Si la flag 'build' está desactivada, cancelamos el evento completamente.
+        if (!core.getFlag("build")) {
+            event.setCanceled(true);
+            String owner = core.isAdmin() ? "la Administración" : core.getOwnerName();
+            player.displayClientMessage(Component.literal("§c[!] Zona protegida por " + owner), true);
+        }
+    }
+
+    /**
+     * Este método es la clave: Permite que el bloque se abra/use,
+     * pero prohíbe que el ítem de la mano intente colocarse como bloque.
+     */
+    private static void allowInteractionButDenyPlacement(PlayerInteractEvent.RightClickBlock event) {
+        // Obligamos a Minecraft a usar el BLOQUE
+        event.setUseBlock(net.neoforged.neoforge.common.util.TriState.TRUE);
+        // PROHIBIMOS usar el ÍTEM (esto evita que salte el mensaje de 'No puedes construir')
+        event.setUseItem(net.neoforged.neoforge.common.util.TriState.FALSE);
+    }
+
+    // --- 2. GESTIÓN DE BLOQUES (SOLO PARA ROMPER Y PONER REALMENTE) ---
 
     @SubscribeEvent
     public static void onBlockBreak(BlockEvent.BreakEvent event) {
-        // Cambiamos a "build" para que una sola flag controle todo lo referente a obras
-        if (isActionRestricted(event.getPlayer(), event.getLevel(), event.getPos(), "build")) {
+        if (isBuildRestricted(event.getPlayer(), event.getLevel(), event.getPos())) {
             event.setCanceled(true);
         }
     }
@@ -50,110 +103,62 @@ public class ProtectionEvent {
     @SubscribeEvent
     public static void onBlockPlace(BlockEvent.EntityPlaceEvent event) {
         if (event.getEntity() instanceof Player player) {
-            // Usamos "build" consistentemente
-            if (isActionRestricted(player, event.getLevel(), event.getPos(), "build")) {
+            if (isBuildRestricted(player, event.getLevel(), event.getPos())) {
                 event.setCanceled(true);
             }
         }
     }
 
-    @SubscribeEvent
-    public static void onMobSpawn(net.neoforged.neoforge.event.entity.EntityJoinLevelEvent event) {
-        // Solo nos interesan los mobs hostiles (monstruos) y que sea en el servidor
-        if (event.getLevel().isClientSide || !(event.getEntity() instanceof net.minecraft.world.entity.monster.Monster mob)) return;
+    private static boolean isBuildRestricted(Player player, LevelAccessor level, BlockPos pos) {
+        if (level.isClientSide()) return false;
+        ProtectionCoreBlockEntity core = findCoreAt((ServerLevel) level, pos);
+        if (core == null || core.isTrusted(player)) return false;
 
-        BlockPos pos = mob.blockPosition();
-        ServerLevel sLevel = (ServerLevel) event.getLevel();
-
-        ProtectionCoreBlockEntity core = findCoreAt(sLevel, pos);
-        if (core != null) {
-            // Buscamos la flag "mob-spawn". Si es FALSE (Roja), cancelamos el spawn.
-            if (!core.getFlag("mob-spawn")) {
-                event.setCanceled(true);
-            }
+        if (!core.getFlag("build")) {
+            String owner = core.isAdmin() ? "la Administración" : core.getOwnerName();
+            player.displayClientMessage(Component.literal("§c[!] No puedes construir en la zona de " + owner), true);
+            return true;
         }
+        return false;
     }
 
-    @SubscribeEvent
-    public static void onBucketUse(PlayerInteractEvent.RightClickBlock event) {
-        BlockPos targetPos = event.getPos().relative(event.getFace());
-        if (isActionRestricted(event.getEntity(), event.getLevel(), targetPos, "build")) {
-            event.setCanceled(true);
-        }
-    }
-
-    // --- 2. EXPLOSIONES ---
+    // --- 3. OTROS EVENTOS (EXPLOSIONES, DAÑO, MOBS) ---
 
     @SubscribeEvent
     public static void onExplosion(ExplosionEvent.Detonate event) {
         if (!(event.getLevel() instanceof ServerLevel sLevel)) return;
-
         event.getAffectedBlocks().removeIf(pos -> {
             ProtectionCoreBlockEntity core = findCoreAt(sLevel, pos);
             return core != null && !core.getFlag("explosions");
         });
     }
 
-    // --- 3. DAÑO E INTERACCIONES ---
-
     @SubscribeEvent
     public static void onDamage(LivingIncomingDamageEvent event) {
         if (!(event.getEntity().level() instanceof ServerLevel sLevel)) return;
-
         ProtectionCoreBlockEntity core = findCoreAt(sLevel, event.getEntity().blockPosition());
         if (core == null) return;
 
-        // 1. Lógica de Fuego (del Admin Core)
-        if (event.getSource().is(DamageTypes.IN_FIRE) || event.getSource().is(DamageTypes.LAVA) || event.getSource().is(DamageTypes.ON_FIRE)) {
-            if (!core.getFlag("fire-damage")) {
-                event.setCanceled(true);
-                event.getEntity().setRemainingFireTicks(0); // Apaga al jugador
-                return;
-            }
-        }
-
-        // 2. Lógica de PvP
-        if (event.getSource().getEntity() instanceof Player && event.getEntity() instanceof Player) {
-            if (!core.getFlag("pvp")) {
-                event.setCanceled(true);
-            }
-        }
-
-        // 3. Lógica de Caída
-        if (event.getSource().is(DamageTypes.FALL) && !core.getFlag("fall-damage")) {
+        // PvP, Caída y Fuego
+        if (event.getSource().getEntity() instanceof Player && event.getEntity() instanceof Player && !core.getFlag("pvp"))
             event.setCanceled(true);
+        if (event.getSource().is(DamageTypes.FALL) && !core.getFlag("fall-damage")) event.setCanceled(true);
+        if ((event.getSource().is(DamageTypes.IN_FIRE) || event.getSource().is(DamageTypes.LAVA)) && !core.getFlag("fire-damage")) {
+            event.setCanceled(true);
+            event.getEntity().setRemainingFireTicks(0);
         }
     }
 
+    // --- 4. UTILIDADES DE BÚSQUEDA ---
 
-    @SubscribeEvent
-    public static void onInteractBlock(PlayerInteractEvent.RightClickBlock event) {
-        if (event.getLevel().isClientSide) return;
-
-        BlockPos pos = event.getPos();
-        Player player = event.getEntity();
-        ServerLevel sLevel = (ServerLevel) event.getLevel();
-
-        ProtectionCoreBlockEntity core = findCoreAt(sLevel, pos);
-        // Si no hay core, o es el bloque físico del core, o el jugador es de confianza, permitimos.
-        if (core == null || pos.equals(core.getBlockPos()) || core.isTrusted(player)) return;
-
-        BlockEntity be = sLevel.getBlockEntity(pos);
-
-        // 🔹 Lógica de Flags Independiente
-        // Si el bloque tiene inventario, usamos "chests". Si no, es una interacción (puertas/palancas).
-        String flagNeeded = (be instanceof net.minecraft.world.Container) ? "chests" : "interact";
-
-        // Verificamos ÚNICAMENTE la flag necesaria.
-        if (!core.getFlag(flagNeeded)) {
-            event.setCanceled(true);
-            String msg = flagNeeded.equals("chests") ? "§c[!] Los cofres están protegidos." : "§c[!] La interacción está desactivada.";
-            player.displayClientMessage(Component.literal(msg), true);
+    public static ProtectionCoreBlockEntity findCoreAt(Level level, BlockPos pos) {
+        if (!(level instanceof ServerLevel sLevel)) return null;
+        ProtectionDataManager.CoreEntry entry = ProtectionDataManager.get(sLevel).getCoreAt(pos);
+        if (entry != null && sLevel.getBlockEntity(entry.pos()) instanceof ProtectionCoreBlockEntity core) {
+            return core;
         }
+        return null;
     }
-
-
-    // --- 4. TICKS Y MENSAJES ---
 
     @SubscribeEvent
     public static void onPlayerTick(PlayerTickEvent.Post event) {
@@ -176,47 +181,10 @@ public class ProtectionEvent {
         }
     }
 
-    // --- 5. LÓGICA DE BÚSQUEDA CENTRALIZADA ---
 
-    private static boolean isActionRestricted(Player player, LevelAccessor level, BlockPos pos, String action) {
-        if (level.isClientSide()) return false;
-        ServerLevel sLevel = (ServerLevel) level;
+    // --- 4. TICKS Y MENSAJES ---
 
-        ProtectionCoreBlockEntity core = findCoreAt(sLevel, pos);
-        if (core == null) return false;
 
-        // 1. JERARQUÍA 1: Si es Trusted (Dueño, OP, Clan, Invitado), omitimos las flags.
-        if (core.isTrusted(player)) return false;
-
-        // 2. JERARQUÍA 2: Si NO es trusted, manda la Flag.
-        // Si la flag es TRUE (ON), significa que el acceso es PÚBLICO.
-        boolean isPublic = core.getFlag(action);
-
-        if (isPublic) {
-            return false; // La flag está en ON, cualquier usuario puede actuar.
-        } else {
-            // La flag está en OFF y el jugador no es de confianza: BLOQUEAR.
-            String ownerName = core.isAdmin() ? "Administración" : core.getOwnerName();
-            player.displayClientMessage(Component.literal("§c[!] Acción bloqueada por la protección de " + ownerName), true);
-            return true;
-        }
-    }
-
-    // Lógica para detección CUADRADA y VERTICAL COMPLETA
-    public static ProtectionCoreBlockEntity findCoreAt(Level level, BlockPos pos) {
-        if (!(level instanceof ServerLevel sLevel)) return null;
-
-        ProtectionDataManager manager = ProtectionDataManager.get(sLevel);
-        ProtectionDataManager.CoreEntry entry = manager.getCoreAt(pos);
-
-        if (entry != null) {
-            // Obtenemos la entidad de bloque real usando la posición guardada en el entry
-            if (sLevel.getBlockEntity(entry.pos()) instanceof ProtectionCoreBlockEntity core) {
-                return core;
-            }
-        }
-        return null;
-    }
 
     // --- UTILIDADES ---
 
